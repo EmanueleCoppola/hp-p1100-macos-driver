@@ -1,0 +1,9 @@
+[package]
+name = "p1005-protocol"
+description = "ZjStream (ZJS) encoder and decoder for HP host-based LaserJets"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+path = "src/lib.rs"

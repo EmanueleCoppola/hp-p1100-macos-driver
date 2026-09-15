@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/p1005-protocol",
+    "crates/p1005-raster",
+    "crates/p1005-job",
+    "crates/p1005-jbig",
+    "crates/p1005-filter",
+    "crates/p1005-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+rust-version = "1.75"
+
+[profile.release]
+lto = true
+strip = true

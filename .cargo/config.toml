@@ -1,0 +1,11 @@
+# Linking native (aarch64-apple-darwin) binaries needs Apple's linker, which is gated
+# behind the Xcode licence on this machine. The wasm32-wasip1 target links with Rust's
+# own bundled rust-lld and needs no SDK, so pure-logic tests are run there meanwhile.
+#
+# The test runner cannot be configured here with a relative path: cargo runs test
+# binaries with the *package* directory as cwd, not the workspace root. Use the wrapper
+# instead, which passes an absolute runner path:
+#
+#     ./scripts/test-wasm.sh
+#
+# See docs/testing.md.

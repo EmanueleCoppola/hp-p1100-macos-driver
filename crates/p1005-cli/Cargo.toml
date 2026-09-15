@@ -1,0 +1,15 @@
+[package]
+name = "p1005-cli"
+description = "Command line tool for the p1005 driver stack"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+p1005-protocol = { path = "../p1005-protocol" }
+p1005-raster = { path = "../p1005-raster" }
+p1005-job = { path = "../p1005-job" }
+
+[[bin]]
+name = "p1005"
+path = "src/main.rs"

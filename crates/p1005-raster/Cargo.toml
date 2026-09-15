@@ -1,0 +1,9 @@
+[package]
+name = "p1005-raster"
+description = "CUPS raster reader and mono conversion for the p1005 driver"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+path = "src/lib.rs"

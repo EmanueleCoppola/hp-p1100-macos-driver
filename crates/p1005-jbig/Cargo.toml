@@ -1,0 +1,9 @@
+[package]
+name = "p1005-jbig"
+description = "JBIG (T.82) encoder for bi-level page images"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+path = "src/lib.rs"

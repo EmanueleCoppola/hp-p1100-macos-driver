@@ -1,0 +1,141 @@
+# Architecture of the replacement
+
+## What has to be true
+
+The replacement must: drive the P1102; be ARM64 with no Rosetta; be buildable from
+source here; keep the raster/protocol logic separate from CUPS, USB and packaging; and
+not sit on something macOS is actively deleting.
+
+## The decisive constraint we measured
+
+The blocker that actually killed HP's driver here is the **architecture**. `rastertozjs` is
+x86_64, Rosetta is not installed, and there is no x86_64 dyld shared cache, so the process
+cannot launch at all: `bad CPU type in executable` is what it prints.
+
+An earlier version of this document gave a second reason that turned out to be wrong. It
+claimed `/usr/lib/libcups.2.dylib` no longer exists, which would make any dependency on the
+CUPS library fatal on its own. That is false here: Apple's own `cgpdftoraster`,
+`cgpdftopdf`, `cgpdftops` and the `usb` backend all link `libcups.2.dylib` and run, so dyld
+resolves it from the shared cache. The mistake was checking `/usr/lib` for the file, which is
+not where modern macOS keeps dylibs.
+
+Not linking `libcups` is still the right decision, for a weaker and more durable reason: our
+filter then depends on nothing but the raster stream and the Rust standard library, so a CUPS
+ABI or path change cannot break it, and it compiles without CUPS headers. That is
+independence rather than necessity, and it is worth stating as such.
+
+## Options considered
+
+### Option A - traditional CUPS PPD plus a native ARM64 filter
+
+Smallest change: the queue already exists, and the PPD already points at exactly one
+filter for raster and one for commands. The filter is a plain executable reading stdin
+and writing stdout, so it is trivially ARM64 and testable offline.
+
+The objection is that it inherits a deprecated path. The CUPS PPD API has been marked
+deprecated since CUPS 1.6 / macOS 10.8 with removal warned of, and Apple's own tracker
+carries a "Deprecate printer drivers" item. That said, macOS 26 did **not** remove PPD
+support wholesale, and vendors still ship PPDs for macOS 26.x.
+
+### Option B - CUPS 3.x / OpenPrinting Printer Application
+
+OpenPrinting's stated direction is driverless IPP Everywhere, with legacy printers that
+need a driver served by a separate Printer Application. This is the architecture the
+ecosystem is converging on. It is a larger change: it replaces the queue, needs a
+packaged application, and on macOS it does not map onto the existing
+`/etc/cups/ppd` + `cupsFilter` mechanism at all.
+
+### Option C - standalone local IPP daemon advertising IPP Everywhere
+
+Most future-proof: the printer becomes an IPP endpoint the OS sees as driverless. Also
+the most work, and it still needs the same ZjStream encoder underneath. Note that the
+CUPS web administration interface on `localhost:631` is no longer supported in macOS 26,
+so a daemon must not assume that surface exists.
+
+## Decision
+
+Build the core as a **transport-agnostic library**, and host it behind a **CUPS filter
+first** (Option A), with Option B/C kept open by construction.
+
+Reasons, in order of weight:
+
+1. The expensive, risky, irreversible work is the *protocol and raster engine*, and that
+   work is identical in all three options. It is now written with no CUPS, USB or
+   packaging dependency, so re-hosting it later is cheap and does not invalidate it.
+2. `lpadmin` continues to work even where the CUPS web UI does not, so a PPD queue is
+   still creatable on macOS 26. Option A restores printing soonest.
+3. Options B and C need a JBIG encoder and a working USB path before they can do anything
+   a filter cannot, so choosing them first would add packaging work ahead of the actual
+   unknown.
+4. Because we do not link `libcups`, Option A does not inherit the specific failure that
+   broke HP's driver; if Apple eventually removes the PPD path entirely, the same core
+   drops into a Printer Application without being rewritten.
+
+This is a deliberate, reversible sequencing choice, not a preference for the smallest
+possible change. The migration trigger is explicit: if the PPD filter path stops being
+invoked, move the same library behind an IPP Printer Application.
+
+## Shape of the code
+
+```text
+crates/p1005-protocol   ZjStream encoder + decoder. Pure. No I/O, no deps.
+                        Owns the wire format and its golden tests.
+crates/p1005-raster     CUPS raster reader + 8-bit gray -> 1 bpp. Pure. No libcups.
+crates/p1005-job        Raster stream -> whole printer job. Pure. No CUPS, no USB.
+crates/p1005-filter     The CUPS filter binary: a thin argv/stdin/stdout wrapper
+                        around p1005-job. This is the only CUPS-aware code.
+crates/p1005-cli        Offline tooling: inspect rasters, dump streams, encode a job
+                        without involving CUPS at all.
+```
+
+The dependency arrow only ever points one way - filter depends on job, job depends on
+raster and protocol, and raster and protocol depend on nothing. That is what lets every
+layer below the filter be exercised with a printer and a CUPS installation nowhere in
+sight, which is the property that made this testable on this machine at all.
+
+`p1005-usb` does not exist and is not currently needed: Apple's `usb` backend is already
+native, and the filter writes to stdout for CUPS to hand to it.
+
+## Installation shape
+
+The filter and a generated PPD go into `/Library/Printers/p1005/`, and a **new** queue is
+created alongside HP's rather than replacing it. HP's installation is read but never
+written. See `docs/installation.md`.
+
+## Remaining technical risk
+
+**The compressor is no longer the gap.** JBIG is implemented in `crates/p1005-jbig` and its
+output is byte-identical to the reference implementation of the standard, verified against
+four embedded golden vectors and a 22-case sweep. It emits the simplest conforming
+configuration (one layer, one plane, no typical prediction, no adaptive template, `L0` =
+128), which keeps the implementation small and stays inside what every conforming decoder
+must accept. Details and the exact parameters are in `docs/jbig.md`.
+
+The uncompressed `ZJT_RAW_IMAGE` path is also implemented and selectable with
+`P1005_RAW=1`, because whether the printer accepts it is still an open hardware question
+and it is a useful fallback to have. `p1005-job` prepares the same 1 bpp bitmap either way,
+so choosing between the two encoders touches no other layer.
+
+What remains is therefore hardware validation, not design or implementation:
+
+1. Whether the printer accepts our framing, item sets and PJL wrapper at all.
+2. Whether it accepts our JBIG stream. The stream is standard-conforming and verified
+   against the reference, so a rejection here would mean a *printer-specific* constraint
+   rather than an encoder bug - which is exactly why the reference-correct payload from
+   `scripts/make-test-job.py` is worth trying, to tell those two cases apart.
+3. Whether `ZJT_RAW_IMAGE` works, and whether the 128-pixel-aligned row stride is what it
+   expects.
+4. Whether a power cycle needs a host-side firmware download. **LIKELY no**, but unverified.
+
+## Open items
+
+Every known difference from HP's driver, with what would settle each one, is listed in
+docs/differences.md.
+
+- No hardware validation has happened yet: the printer is not attached, so USB identity,
+  endpoint layout, framing acceptance and the raw-image question are all unverified.
+- Whether a filter-based queue survives future macOS releases is a migration question
+  rather than a design one; the core is positioned so that it does not matter.
+- Whether our *specific* JBIG configuration is accepted. It is standard-conforming and
+  byte-identical to the reference, so a rejection would point at a printer-side constraint
+  rather than at the encoder - but it is unverified either way.

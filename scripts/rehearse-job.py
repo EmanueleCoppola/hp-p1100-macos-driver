@@ -1,0 +1,255 @@
+#!/usr/bin/env python3
+"""Rehearse the printing pipeline the way CUPS will drive it, without a printer.
+
+This is the closest thing to the real integration that can be done before the hardware
+arrives, and it exercises the exact boundary CUPS uses:
+
+    Apple's cgpdftoraster  ->  our filter  ->  job bytes
+    (cupsfilter, native)       (p1005-filter)   (judged by the reference JBIG decoder)
+
+Every piece of that is real: the raster comes from the same filter CUPS would run, the job
+is produced by our actual filter binary with the argv shape CUPS uses, and the result is
+decoded by the reference implementation of the standard rather than by our own code.
+
+The filter is run from its wasm build, because linking a native binary needs Apple's linker
+and that is behind the Xcode licence gate. See docs/testing.md.
+
+Usage:
+  scripts/rehearse-job.py [--options "Duplex=DuplexNoTumble"] [--text FILE] [--keep DIR]
+
+Exit status 0 when the rehearsal passes, 1 when it does not.
+"""
+
+import argparse
+import importlib.util
+import os
+import shutil
+import struct
+import subprocess
+import sys
+import tempfile
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(HERE)
+WASM_FILTER = os.path.join(REPO, 'target/wasm32-wasip1/debug/p1005-filter.wasm')
+PPD = '/etc/cups/ppd/HP_LaserJet_Professional_P1102.ppd'
+
+
+def load(name):
+    """Import one of the sibling tools so its logic is reused rather than duplicated."""
+    spec = importlib.util.spec_from_file_location(name, os.path.join(HERE, name + '.py'))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def wasi_command(extra_env=None):
+    """Return the command prefix that runs a wasm module, or fail with advice.
+
+    wasmtime does not inherit the host environment, so variables the filter reads have to
+    be passed explicitly with --env. node's WASI takes them from process.env instead.
+    """
+    extra_env = extra_env or {}
+    wt = os.environ.get('P1005_WASMTIME') or shutil.which('wasmtime')
+    if wt:
+        cmd = [wt, 'run', '--dir', '/']
+        for key, value in extra_env.items():
+            cmd += ['--env', '%s=%s' % (key, value)]
+        return cmd
+    node = shutil.which('node')
+    if node:
+        return ['node', os.path.join(HERE, 'wasi-run.mjs')]
+    raise SystemExit('need wasmtime or node to run the wasm filter; see docs/testing.md')
+
+
+def make_raster(text, out_path):
+    if not os.path.exists(PPD):
+        raise SystemExit('cannot find the printer PPD at ' + PPD)
+    with open(out_path, 'wb') as dst:
+        proc = subprocess.run(
+            ['/usr/sbin/cupsfilter', '-m', 'application/vnd.cups-raster', '-p', PPD, text],
+            stdout=dst, stderr=subprocess.PIPE)
+    if proc.returncode != 0:
+        raise SystemExit('cupsfilter failed:\n' + proc.stderr.decode('utf-8', 'replace'))
+    return os.path.getsize(out_path)
+
+
+def run_filter(raster_path, options, out_path, raw=False):
+    overrides = {'P1005_RAW': '1'} if raw else {}
+    cmd = wasi_command(overrides) + [WASM_FILTER, '1', 'manu', 'rehearsal', '1', options, raster_path]
+    env = dict(os.environ)
+    env.update(overrides)
+    with open(out_path, 'wb') as dst:
+        proc = subprocess.run(cmd, stdout=dst, stderr=subprocess.PIPE, env=env)
+    return proc.returncode, proc.stderr.decode('utf-8', 'replace').strip()
+
+
+def expected_pages(raster_bytes, cr):
+    """The page bitmaps an independent computation says the raster represents.
+
+    Covers the two depths the filter converts: 8 bits per pixel grey, thresholded, and
+    1 bit per pixel, copied through.
+    """
+    out = []
+    for _, off, h, payload in cr.walk(raster_bytes):
+        width = (h['width'] + 127) & ~127
+        stride = width // 8
+        bpl = h['bytes_per_line']
+        px = raster_bytes[off + cr.PAGE_HEADER_LEN:off + cr.PAGE_HEADER_LEN + payload]
+        bm = bytearray(stride * h['height'])
+        ink = 0
+        depth = h['bits_per_pixel']
+        if depth == 8:
+            for y in range(h['height']):
+                src = px[y * bpl:(y + 1) * bpl]
+                dst = y * stride
+                for x in range(h['width']):
+                    if src[x] < 128:
+                        bm[dst + (x >> 3)] |= 0x80 >> (x & 7)
+                        ink += 1
+        elif depth == 1:
+            copy = min(bpl, stride)
+            for y in range(h['height']):
+                row = px[y * bpl:y * bpl + copy]
+                bm[y * stride:y * stride + copy] = row
+                ink += sum(bin(b).count('1') for b in row)
+        else:
+            raise SystemExit('the expected-bitmap computation does not handle %d bpp' % depth)
+        out.append((width, h['height'], bytes(bm), ink))
+    return out
+
+
+def page_images(chunks):
+    """Each page's compressed image as a complete BIE, in page order."""
+    images = []
+    i = 0
+    while i < len(chunks):
+        if chunks[i]['type'] == 4:
+            bih = chunks[i]['payload']
+            parts = []
+            i += 1
+            while i < len(chunks) and chunks[i]['type'] == 5:
+                parts.append(chunks[i]['payload'])
+                i += 1
+            images.append(bih + b''.join(parts).rstrip(b'\x00'))
+            continue
+        i += 1
+    return images
+
+
+def raw_images(chunks):
+    """Each page's uncompressed image payload, in page order."""
+    return [c['payload'] for c in chunks if c['type'] == 8]
+
+
+
+def main(argv):
+    ap = argparse.ArgumentParser(add_help=True,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter,
+                                 description=__doc__)
+    ap.add_argument('--options', default='',
+                    help='CUPS options string, exactly as cupsd would pass it')
+    ap.add_argument('--text', default=os.path.join(REPO, 'fixtures/inputs/text-1p.txt'))
+    ap.add_argument('--raster', help='rehearse an existing CUPS raster file instead of '
+                                     'generating one with cupsfilter')
+    ap.add_argument('--keep', help='keep the intermediate files in this directory')
+    ap.add_argument('--raw', action='store_true',
+                    help='rehearse the uncompressed ZJT_RAW_IMAGE path instead')
+    args = ap.parse_args(argv)
+
+    if not os.path.exists(WASM_FILTER):
+        return fail('build the filter first:\n'
+                    '    cargo build --target wasm32-wasip1 -p p1005-filter --offline')
+
+    cr = load('cupsraster')
+    zc = load('zjs-compare')
+
+    work = args.keep or tempfile.mkdtemp(prefix='p1005-rehearsal-')
+    os.makedirs(work, exist_ok=True)
+    raster_path = os.path.join(work, 'page.raster')
+    job_path = os.path.join(work, 'job.zjs')
+
+    print('rehearsing the CUPS -> filter boundary')
+    print('  options: %r' % args.options)
+    if args.raster:
+        raster_path = args.raster
+        print('  1. rehearsing the captured raster %s (%d bytes)'
+              % (raster_path, os.path.getsize(raster_path)))
+    else:
+        size = make_raster(args.text, raster_path)
+        print('  1. cgpdftoraster (Apple, native) produced a %d byte CUPS raster' % size)
+
+    code, stderr = run_filter(raster_path, args.options, job_path, raw=args.raw)
+    if code != 0:
+        return fail('the filter exited %d\n%s' % (code, stderr))
+    job = open(job_path, 'rb').read()
+    print('  2. our filter produced a %d byte job' % len(job))
+    for line in stderr.splitlines():
+        print('       %s' % line)
+
+    _, stream, _ = zc.split_framing(job)
+    chunks = zc.parse_chunks(stream)
+    ops = [zc.opcode_name(c['type']) for c in chunks]
+    print('  3. chunk sequence: %s' % ' '.join(ops))
+
+    if args.raw:
+        images = raw_images(chunks)
+        kind = 'raw'
+        if not images:
+            return fail('no ZJT_RAW_IMAGE chunk in the job; the filter was not put in raw mode')
+    else:
+        images = page_images(chunks)
+        kind = 'compressed'
+
+    pages = expected_pages(open(raster_path, 'rb').read(), cr)
+    if len(images) != len(pages):
+        return fail('the job carries %d %s image(s) but the raster has %d page(s)'
+                    % (len(images), kind, len(pages)))
+    print('  4. the job carries %d %s page image(s) for %d raster page(s)'
+          % (len(images), kind, len(pages)))
+
+    for n, ((width, height, expected, ink), image) in enumerate(zip(pages, images), start=1):
+        if args.raw:
+            if image != expected:
+                return fail('page %d: the raw image does not match the bitmap the raster '
+                            'describes' % n)
+            print('  5. page %d: raw payload equals the expected %dx%d bitmap (%d ink pixels)'
+                  % (n, width, height, ink))
+            continue
+        bie_n = os.path.join(work, 'image-%d.jbg' % n)
+        dec_n = os.path.join(work, 'decoded-%d.pbm' % n)
+        exp_n = os.path.join(work, 'expected-%d.pbm' % n)
+        with open(bie_n, 'wb') as f:
+            f.write(image)
+        rc = subprocess.run([os.path.join(HERE, 'jbig-oracle.sh'), 'decode', bie_n, dec_n])
+        if rc.returncode != 0:
+            return fail('page %d: the reference JBIG decoder rejected our image' % n)
+        with open(exp_n, 'wb') as f:
+            f.write(b'P4\n%d %d\n' % (width, height) + expected)
+        rc = subprocess.run([sys.executable, os.path.join(HERE, 'pbm-compare.py'),
+                             exp_n, dec_n], stdout=subprocess.PIPE)
+        print('  5. page %d: reference decoder vs the independently computed bitmap: %s'
+              % (n, rc.stdout.decode().strip()))
+        if rc.returncode != 0:
+            return fail('page %d: the decoded page does not match the raster' % n)
+
+    print()
+    print('rehearsal passed%s' % ('' if args.keep else ' (temporary files removed)'))
+    if args.keep:
+        print('intermediates kept in %s' % work)
+    else:
+        # only ever remove the scratch directory we created: with --raster, raster_path is
+        # the caller's own file and must survive
+        for name in os.listdir(work):
+            os.unlink(os.path.join(work, name))
+        os.rmdir(work)
+    return 0
+
+
+def fail(message):
+    print('REHEARSAL FAILED: %s' % message, file=sys.stderr)
+    return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))

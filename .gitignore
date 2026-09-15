@@ -1,0 +1,15 @@
+# Rust build output. The wasm builds used for verification land here too.
+/target/
+
+# Python bytecode from running the inspection and test scripts.
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
+
+# Nothing in this repository is generated from a printer capture: fixtures are tiny text
+# inputs, and the generated CUPS rasters (tens of megabytes) stay in /tmp. If you do add a
+# capture for comparison, keep it out of version control unless it is small.
+*.raster
+*.jbg
