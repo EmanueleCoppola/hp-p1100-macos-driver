@@ -191,6 +191,27 @@ See the wasm section in docs/testing.md, including a caveat about node's WASI.
         fixtures/inputs/text-1p.txt > /tmp/1p.raster
     $PY scripts/cupsraster.py dump /tmp/1p.raster
 
+## Framing an image the reference encoder compressed
+
+`p1102 wrap` builds a complete job around a JBIG image our own encoder did not produce. That is
+what separates "the printer rejects our framing" from "the printer rejects our compression": a
+page the reference implementation compressed goes out as a normal job, and the pieces come
+straight out of that encoder's output, because its BIH is byte-identical to ours for the same
+page and sits in the first twenty bytes:
+
+    $PY scripts/make-test-job.py --pattern square --page letter \
+        -o /tmp/ours.zjs --keep-pbm /tmp/ref-in.pbm
+    ./scripts/jbig-oracle.sh encode /tmp/ref-in.pbm /tmp/ref.jbg
+    dd if=/tmp/ref.jbg bs=1 count=20 of=/tmp/ref.bih
+    dd if=/tmp/ref.jbg bs=1 skip=20 of=/tmp/ref.bid
+    p1102 wrap --bih /tmp/ref.bih --bid /tmp/ref.bid --width 4900 --height 6400 \
+        -o /tmp/ref.zjs
+    p1102 zjs-dump /tmp/ref.zjs
+
+`--width` is the page's true pixel width; the 128-pixel alignment the printer expects is added
+by the wrapper. The result is an ordinary job file, so it goes to the printer the same way any
+other one does.
+
 ## How the plan maps onto this repository
 
 The request had eleven phases. Where each one landed, and what its evidence is:
