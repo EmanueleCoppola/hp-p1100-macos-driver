@@ -93,11 +93,14 @@ NOTES:
 /// command rather than a DEVICE_URI dance.
 const USB_BACKEND: &str = "/usr/libexec/cups/backend/usb";
 
-/// Measured 600 dpi page geometry, the same page images cgpdftoraster produces.
+/// Measured 600 dpi page geometry: the raster's dimensions, which are the PPD's imageable area
+/// with its 12 pt margins taken off rather than the paper's - for Legal 588 x 984 pt, 4900 x
+/// 8200 px. scripts/bringup-compare.py holds this to what the filter derives from a real CUPS
+/// raster, which is how the Legal height here was found to be the paper's 8100.
 const TEST_PAGES: [(&str, u32, u32, u32); 3] = [
     ("letter", 4900, 6400, 1),
     ("a4", 4758, 6817, 9),
-    ("legal", 4900, 8100, 5),
+    ("legal", 4900, 8200, 5),
 ];
 const DEFAULT_TEST_DPI: u32 = 600;
 

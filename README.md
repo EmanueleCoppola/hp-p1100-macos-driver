@@ -317,9 +317,15 @@ Verified by execution, on real captured data where it matters:
   Options a job does not name are taken from the PPD, the way CUPS's filter interface expects
   and the way HP's driver does it: CUPS passes only what the user changed, so the file's
   `*Default*` keywords fill the rest and the command line overrides them.
-- The job builder and the JBIG oracle: all eight deterministic test pages build, walk back
-  with the expected chunk sequence, and round-trip their compressed image through the
-  JBIG_BIH / JBIG_BID split unchanged.
+- **The bring-up tool, against the shipped framing and against CUPS.**
+  `scripts/bringup-compare.py` builds each test page with `scripts/make-test-job.py` - the tool a
+  hardware session uses first, whose Python framing mirrors `crates/p1102-protocol` - has
+  `p1102 wrap` frame the same reference-compressed image with the Rust code, and asks
+  `p1102 test-page` for the same pattern. All three agree in all ten cases, byte for byte, so a
+  printer that rejects a test page is rejecting what the filter sends. The same script checks what
+  each test page claims about the page against the job the filter builds from a real CUPS raster of
+  that size, which is how both Rust and Python tables were found to be giving Legal 8100 px where a
+  real Legal job carries 8200.
 - The streaming filter: peak memory is flat in the job size. Measured now with
   `/usr/bin/time -l`, peak RSS is 37.3 MB for a 31 MB one-page raster, 37.4 MB for 94 MB and
   37.5 MB for 313 MB - a ten times larger job for 0.3% more memory - against 312 MB for the
