@@ -1,5 +1,5 @@
 #!/bin/sh
-# Install the native p1102 filter and create a CUPS queue for the HP LaserJet P1102.
+# Install the native p1102 filter and create a CUPS queue for the HP LaserJet Professional P1102.
 #
 # Design rules, intentionally:
 #   - The existing HP installation is read but never written. The source PPD is only read.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a complete, reference-correct ZjStream job for the HP LaserJet P1102.
+"""Build a complete, reference-correct ZjStream job for the HP LaserJet Professional P1102.
 
 This exists so the printer can be brought up on hardware *now*, before our own JBIG
 encoder is written. It uses the reference encoder (scripts/jbig-oracle.sh) for the
