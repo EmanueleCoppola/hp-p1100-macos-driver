@@ -132,6 +132,17 @@ propose (PJL over the CUPS backchannel) would have been a different protocol fro
 the printer actually answers, which is the kind of plausible-looking substitute this
 project is trying not to ship.
 
+One nuance, because it is where a future implementation should start if this is ever built:
+CUPS does have a supported way for a *filter* to query the device - the side channel, which
+the reference tree uses in its Konica-Minolta command filter (`cups/sidechannel.h`) to send
+PJL and read the reply, and which Apple's own supplies reporting uses too. HP did not take
+that route for this family even though it was available, and **LIKELY** that is because the
+printer does not report supplies over PJL at all: the toner level on these models lives in
+the embedded web server, which is why the driver goes through the trouble of an HTTP request
+over the bulk pipes. So the first question for a hardware session that wants this feature is
+not "how do I write the filter" but "does the printer answer a PJL supply query", and the
+side channel is what would carry it.
+
 It also may not be worth building even with hardware: the P1102 is a single-cartridge
 engine whose level reporting is a local web page, and a USB-attached unit has no address
 for the `snmpInk` fallback either. What a hardware session should establish first is simply
