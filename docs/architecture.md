@@ -31,6 +31,12 @@ with no libcups, no frameworks, no private frameworks and no rpaths. HP's filter
 (libcups, libcupsimage, libstdc++.6 and libSystem). The entire dependency surface of the
 replacement is the C library, which is what makes it hard for a macOS release to break it.
 
+That is checked rather than remembered. Every run of `scripts/verify-native.sh` - and so of
+`scripts/verify-all.sh` - reads the load commands of each binary we build and install and
+fails on any library other than libSystem, because a stray dependency is the one change that
+would quietly undo this property. Adding `--include-hp` prints HP's filter's four libraries
+beside ours; they are reported but cannot change the verdict.
+
 One cosmetic artefact of the rust-lld fallback route: the recorded SDK version in the load
 command comes out as 11.0.0 rather than the real SDK, because rustc cannot ask xcrun for the
 SDK path while the licence is unaccepted. It is informational and does not affect the linked
@@ -162,7 +168,7 @@ reports why".
 
 ## Installation shape
 
-The filter and a generated PPD go into `/Library/Printers/p1102/`, and a **new** queue is
+The filter, a generated PPD and the printer icon go into `/Library/Printers/p1102/`, and a **new** queue is
 created alongside HP's rather than replacing it. HP's installation is read but never
 written. See `docs/installation.md`.
 

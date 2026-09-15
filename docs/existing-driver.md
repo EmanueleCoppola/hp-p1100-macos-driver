@@ -127,6 +127,11 @@ binaries load only `/usr/lib/libSystem.B.dylib` - no libcups, no frameworks, no 
 frameworks, no rpaths. That is the evidence for the claim that the replacement minimises its
 reliance on the platform: the entire dependency surface is the C library.
 
+`scripts/verify-native.sh` reads the load commands of every binary we build and install on
+every run and fails if one of them names anything else, so this stays true instead of having
+been true on the day it was measured. Run it with `--include-hp` and HP's four libraries
+appear in the same output, as the control for the comparison above.
+
 ### Census of the whole installation (CONFIRMED)
 
 Judging two filters would understate the problem, so every Mach-O binary in the HP
