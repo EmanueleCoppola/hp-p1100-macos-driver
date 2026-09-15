@@ -144,6 +144,11 @@ the property is flatness rather than a single figure. Reproduce it with a multi-
 /usr/bin/time -l target/release/p1102-filter 1 manu m 1 '' /tmp/ten-page.raster > /dev/null
 ```
 
+`scripts/memory-check.py` does that comparison as a check rather than an observation: it builds a
+one-page and a ten-page raster, measures both, and fails if the larger run uses 1.25 times the
+memory of the smaller. The bar is loose on purpose - a return to buffering the whole job shows up
+as a factor of ten, and the point is to catch that rather than to pin the allocator down.
+
 The output was byte-identical before and after that refactor, which is how it was checked.
 
 Streaming has one ordering rule of its own: nothing is written until the **first page has been
