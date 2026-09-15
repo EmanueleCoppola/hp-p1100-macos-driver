@@ -18,6 +18,16 @@ DEST=/Library/Printers/p1102
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 FILTER="$REPO/target/release/p1102-filter"
 ICON="$REPO/assets/p1102.icns"
+
+# Apple's /usr/bin/python3 is behind the Xcode licence gate, so picking it blind is what made
+# a dry run print "PPD generation would fail" and skip the artifact checks entirely - a check
+# that reports ok while doing nothing. Prefer an interpreter that actually runs.
+PYTHON=${PYTHON:-}
+if [ -z "$PYTHON" ]; then
+    for candidate in /opt/homebrew/bin/python3.13 /opt/homebrew/bin/python3.10 python3; do
+        if "$candidate" -c 'pass' >/dev/null 2>&1; then PYTHON=$candidate; break; fi
+    done
+fi
 PYTHON=${PYTHON:-python3}
 DRY=0
 FORCE=0
@@ -63,10 +73,13 @@ die() { echo "error: $*" >&2; exit 1; }
 
 # The lines of a diff against the source PPD that may legitimately change. The source arrives on
 # stdin, so a gzipped one can be decompressed into it without a temporary file.
+# The lines the generator is allowed to add, change or drop, as one pattern on a diff line.
+# Anything else is printed and fails the install, which is what catches a generator
+# regression that mangled the device description rather than the driver wiring.
+PPD_ALLOWED='^[<>] \*(%%|PPD-Adobe|NickName|[a-zA-Z_@-]+\.Translation NickName/|cupsFilter: "application/vnd\.cups-(raster|command)|cupsCommands|APPrinterUtilityPath|APPrinterIconPath|OpenUI \*p1102Grey|OrderDependency: [0-9]+ [A-Za-z]+ \*p1102Grey|Defaultp1102Grey|p1102Grey |CloseUI: \*p1102Grey|[a-zA-Z_@-]+\.Translation p1102Grey/|[a-zA-Z_@-]+\.p1102Grey )'
+
 ppd_diff() {
-    diff - "$1" 2>/dev/null | grep -E '^[<>]' | grep -vE \
-        '^[<>] \*(%%|NickName|[a-zA-Z_@-]+\.Translation NickName/|cupsFilter: "application/vnd\.cups-(raster|command)|cupsCommands|APPrinterUtilityPath|APPrinterIconPath|p1102Grey)' \
-        | grep -vE '^[<>] *$' || true
+    diff - "$1" 2>/dev/null | grep -E '^[<>]' | grep -vE "$PPD_ALLOWED" | grep -vE '^[<>] *$' || true
 }
 
 # --- validating a generated PPD ---------------------------------------------
@@ -90,16 +103,28 @@ check_icon() {
     echo "icon: $icon"
 }
 
-# Two things CUPS itself cannot do here, both checked rather than assumed: macOS ships no
-# cupstestppd, and cupsfilter falls back to its built-in conversion rules when a PPD declares
-# nothing useful, so it produces a raster even from a deliberately empty PPD. So the property
-# checked is the one the documentation actually claims about this file: it differs from the
-# source PPD in exactly the intended ways, and in no other way at all. That is what would
-# catch a generator regression that mangled the device data.
+# Two independent properties, because either one alone has already been not enough here.
+#
+# 1. Line 1 is *PPD-Adobe. A PPD whose first line is a comment is one CUPS cannot open, and it
+#    fails quietly: cupsfilter falls back to its own conversion rules and produces a raster
+#    anyway - 100 dpi, one bit per pixel, instead of the printer's 600 dpi grey. The generated
+#    PPD was in exactly that state, so a queue installed from it would have printed the
+#    fallback page. docs/testing.md carries the measurement.
+# 2. The rest is judged by CUPS's own conformance test, which does ship with macOS
+#    (/usr/bin/cupstestppd; this file claimed the opposite until that was checked). It reads
+#    the parts the diff below cannot judge at all: the option UI, the translations and the
+#    files the PPD references.
+#
+# The diff against the source stays, because cupstestppd never looks at the device data: it
+# would pass a PPD whose paper sizes, resolutions and duplex settings had been mangled. So the
+# property checked is still the one this document claims about the file - it differs from the
+# source in exactly the intended ways, and in no other way.
 check_ppd() {
     ppd=$1
     [ -s "$ppd" ] || die "the generated PPD is empty"
 
+    head -1 "$ppd" | grep -q '^\*PPD-Adobe: "4\.3"' \
+        || die "the generated PPD does not begin with *PPD-Adobe on line 1"
     grep -q "^\*cupsFilter: \"application/vnd.cups-raster 100 $DEST/p1102-filter\"" "$ppd" \
         || die "the generated PPD does not point its raster filter at $DEST/p1102-filter"
     # The icon is the one line that names a file of ours outside this check's usual reach, so
@@ -135,6 +160,27 @@ check_ppd() {
     if [ -n "$unexpected" ]; then
         echo "$unexpected" >&2
         die "the generated PPD changes lines it should not (above)"
+    fi
+
+    # CUPS's own conformance test. A dry run cannot satisfy its two file checks, because
+    # nothing has been installed yet, so they are turned off with the documented -I flags there
+    # and only there; a real run reaches this point with root-owned copies already under $DEST
+    # and is judged strictly, which makes the filter's and the icon's permissions part of what
+    # is checked. Everything else - the option UI, the translations - is judged in both.
+    if [ -x /usr/bin/cupstestppd ]; then
+        if [ "$DRY" = 1 ]; then
+            report=$(/usr/bin/cupstestppd -I filters -I profiles "$ppd" 2>&1 || true)
+        else
+            report=$(/usr/bin/cupstestppd "$ppd" 2>&1 || true)
+        fi
+        fails=$(printf '%s\n' "$report" | grep -E '\*\*FAIL\*\*' || true)
+        if [ -n "$fails" ]; then
+            printf '%s\n' "$fails" >&2
+            die "cupstestppd rejects the generated PPD (above)"
+        fi
+        echo "   cupstestppd: no conformance failures"
+    else
+        echo "   note: no /usr/bin/cupstestppd on this machine, so only the diff was checked"
     fi
     echo "   PPD checks out: only the driver wiring lines differ from $SRC_PPD"
 }

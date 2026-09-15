@@ -80,7 +80,11 @@ run 'rehearsal, JBIG path' "$PY" scripts/rehearse-job.py
 run 'rehearsal, uncompressed path' "$PY" scripts/rehearse-job.py --raw
 run 'rehearsal, with PPD options' "$PY" scripts/rehearse-job.py --options 'Duplex=DuplexNoTumble InputSlot=Manual EconoMode=True pjlDensity=5 pjlJamRecovery=True'
 run 'peak memory does not grow with the job' "$PY" scripts/memory-check.py
-run 'PPD the installer would write' ./scripts/install.sh --dry-run
+# PYTHON is passed on: without it install.sh would fall back to Apple's gated /usr/bin/python3,
+# skip the PPD it is supposed to generate and check, and this line would report ok for a check
+# that never ran.
+run 'PPD the installer would write' env PYTHON="$PY" ./scripts/install.sh --dry-run
+run 'PPD the installer writes, through CUPS' "$PY" scripts/ppd-compare.py
 run 'uninstall, dry run' ./scripts/uninstall.sh --dry-run
 echo
 echo 'the scripts themselves:'

@@ -163,16 +163,21 @@ build and tests:
 what the machine can see:
   native ARM64 check, with HP control      ok
   pre-flight self-test                     ok
+  HP gray tone tables, read and checked    ok
+  tone table check, self-test              ok
 
 correctness against the references:
   whole job vs the reference driver        ok
   JBIG encoder vs the reference            ok
+  two-bit path vs the reference            ok
 
 the CUPS boundary, and the shape of the install:
   rehearsal, JBIG path                     ok
   rehearsal, uncompressed path             ok
   rehearsal, with PPD options              ok
+  peak memory does not grow with the job   ok
   PPD the installer would write            ok
+  PPD the installer writes, through CUPS   ok
   uninstall, dry run                       ok
 
 the scripts themselves:
@@ -197,7 +202,7 @@ attaching the device, and installing the queue. Both are further down this docum
 |---|---|
 | `rustc` / `cargo` 1.98.0 | present; links with Xcode's toolchain directly, or with `rust-lld` and the stub SDK |
 | `/opt/homebrew/bin/python3.13`, `python3.10` | present and working |
-| `file`, `xxd`, `hexdump`, `codesign`, `plutil`, `gzcat`, `cupsfilter`, `lpstat` | present and working |
+| `file`, `xxd`, `hexdump`, `codesign`, `plutil`, `gzcat`, `cupsfilter`, `cupstestppd`, `lpstat` | present and working |
 | our `scripts/macho.py`, `scripts/elfinfo.py`, `scripts/cupsraster.py`, `scripts/hp-tone-table.py` | working |
 | Xcode's own `clang`, `nm`, `otool`, `lipo`, `strings`, `make` | working when called directly with an SDK; see above |
 | `/usr/bin/{clang,cc,otool,nm,lipo,strings,make,python3}` | blocked: these are the gated shims |
@@ -632,6 +637,41 @@ a mistyped invocation wrote half a job to stdout and then complained about the r
 
 
 
+
+## The installer's PPD, driven through CUPS
+
+The rehearsal above uses HP's PPD, because that is the PPD the printer's queue has today. The
+file install.sh writes is a different object, and nothing in the rehearsal shows that CUPS can
+use it. `scripts/ppd-compare.py` is what does.
+
+It generates the PPD exactly as install.sh calls the generator, then puts the same document
+through cupsfilter twice for each case - once with HP's PPD, once with ours - and requires the
+CUPS raster to come out byte-identical. Six cases, each chosen because it moves the raster: the
+default Letter page, A4, Legal, A5, `Resolutions=600x600dpi` (which changes only the
+`cupsCompression` field, 401 to 1 - the marker this driver reads to choose its tone table) and
+`MediaType=Heavy111-130g` (which changes only the media type string in the header). A case that
+stops moving HP's own raster fails the script, so the list cannot quietly decay into six
+comparisons of nothing.
+
+What this establishes is the half of the boundary before the filter: everything the PPD says
+about the device - geometry, margins, resolution, compression, media - reaches the filter the
+way it did with HP's file. It stops at the raster, which is the filter's input; the rehearsal
+above is what carries that raster the rest of the way.
+
+It is also the check that found the defect the earlier versions of this document walked past.
+The generated PPD began with a comment line, ahead of `*PPD-Adobe`. cupsfilter cannot open such
+a file and does not say so: it falls back to its built-in conversion rules and produces a raster
+anyway - 100 dpi, one bit per pixel, 119,500 bytes for the test page, where HP's PPD produces
+31,361,800. Nothing else in the toolchain looks at a PPD's structure, which is why
+`/usr/bin/cupstestppd` matters here: it names the problem in one line ("Illegal whitespace
+character on line 1"). Its presence on macOS was assumed away once; it is there.
+
+CUPS's conformance test runs in both places, with different strictness. `scripts/ppd-compare.py`
+runs it with its two file checks ignored, since nothing is installed under
+`/Library/Printers/p1102` while a developer runs it; install.sh runs it strictly once the filter
+and the icon are in place, which is where their permissions are checked too. That test is also
+what requires the option we add to carry a label in every language the PPD declares - thirteen
+of them, so the generator writes thirty-nine translation lines rather than three.
 
 ## Golden-master comparison: what was intended, and what was done
 

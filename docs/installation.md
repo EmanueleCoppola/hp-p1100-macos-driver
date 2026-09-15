@@ -60,6 +60,7 @@ scripts/make-ppd.py reads the installed PPD and changes only the driver wiring:
 | *APPrinterUtilityPath is dropped | that is HP's utility app |
 | *APPrinterIconPath is repointed at our icns | so the row shows a picture we ship, rather than one of HP's read out of HP's directory |
 | *NickName gains a " (native ARM64)" suffix, and the localised NickName translation keys follow it | so the two queues are distinguishable in the UI, without breaking localisation |
+| *OpenUI *p1102Grey is added, with a label in every language the PPD declares | the two-bit grey screening is ours rather than HP's, and a PPD that declares languages has to translate its own options - CUPS's conformance test fails every one that is missing |
 
 Everything else is byte-for-byte the same file. You can see the exact diff before
 installing anything - the script only reads, and writes a new file:
@@ -74,6 +75,24 @@ installing anything - the script only reads, and writes a new file:
 Apple's /usr/bin/python3 is a shim that refuses to run until the Xcode licence is
 accepted, hence the PYTHON= above. install.sh warns about that rather than failing
 obscurely.
+
+Two things about the generated file are worth knowing before trusting it.
+
+**Its first line has to stay `*PPD-Adobe: "4.3"`.** That is why the banner make-ppd.py writes
+and the option it adds go *after* that line rather than on top of it. A PPD whose first line is
+a comment is one CUPS cannot open, and it fails quietly rather than loudly: cupsfilter falls
+back to its built-in conversion rules and produces a raster anyway - 100 dpi, one bit per
+pixel, 119,500 bytes for the test page, where HP's own PPD produces the printer's 600 dpi grey
+at 31,361,800 bytes. The generated PPD was in exactly that state until it was measured.
+`scripts/ppd-compare.py` is the check: it drives cupsfilter with the PPD install.sh would
+write, for six option combinations that each move the raster in a different way, and requires
+the result to be byte-identical to HP's for the same document and options.
+
+**CUPS's own conformance test is on this Mac.** `/usr/bin/cupstestppd` - an earlier version of
+this document said macOS ships no such thing, which is how the file above stayed malformed
+without anyone noticing, since nothing else in the toolchain reads a PPD's structure. install.sh
+runs it before the queue is created, strictly. The requirement that every option carry a label
+in every language the PPD declares comes from there.
 
 ### The printer icon
 
@@ -119,13 +138,23 @@ Review the plan first, which needs no privileges and prints every command it wou
     ./scripts/install.sh --dry-run
 
 The dry run also generates the PPD into a temporary file and checks it, so it tells you
-something about the artifact rather than only about the commands. CUPS's own PPD validator
-is not available to do that job - macOS ships no `cupstestppd`, and `cupsfilter` falls back to
-its built-in conversion rules when a PPD declares nothing, so it happily produces a raster
-from an empty PPD. The check is therefore the property this document claims about the file:
-that it differs from the source in exactly the listed ways and in no others. A real install
-runs the same check before creating the queue, so a PPD CUPS could not use never reaches
-`lpadmin`.
+something about the artifact rather than only about the commands. Three things are checked,
+and the dry run is not a formality: `scripts/verify-all.sh` passes `PYTHON` in for exactly
+this reason, because without it install.sh picks Apple's gated `/usr/bin/python3`, prints a
+note that PPD generation would fail, and skips these checks while still reporting ok.
+
+- The file begins with `*PPD-Adobe: "4.3"`, which is what makes it a PPD at all.
+- It differs from the source in the listed ways and in no others. That is the property this
+  document claims about the file, and it is the one that catches a generator that mangled the
+  device data rather than the driver wiring.
+- `/usr/bin/cupstestppd`, CUPS's own conformance test, reports no failures. It does ship with
+  macOS; an earlier version of this document said it did not. In a dry run its two file checks
+  are ignored with `-I filters -I profiles`, because nothing has been installed yet. A real
+  install runs it strictly, where the filter's and the icon's permissions are part of what is
+  checked.
+
+A real install runs all three before creating the queue, so a PPD CUPS could not use never
+reaches `lpadmin`.
 
 Options:
 
@@ -159,6 +188,9 @@ are left alone.
     # and it points the icon at ours, which is installed beside it
     grep APPrinterIconPath /etc/cups/ppd/HP_LaserJet_P1102_native.ppd
     file /Library/Printers/p1102/p1102.icns     # expect "Mac OS X icon"
+
+    # CUPS's own conformance test, against the file as it was installed
+    /usr/bin/cupstestppd /etc/cups/ppd/HP_LaserJet_P1102_native.ppd     # expect "PASS"
 
     # print something and watch the job
     lp -d HP_LaserJet_P1102_native /path/to/file.pdf

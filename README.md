@@ -266,7 +266,7 @@ The request had eleven phases. Where each one landed, and what its evidence is:
 | 8. golden-master comparison | `scripts/reference-compare.py` | done in the only form available: 31 cases against the reference driver, since HP's binary cannot run on this Mac |
 | 9. real printer testing | `scripts/make-test-job.py`, `docs/testing.md` | **blocked**: needs the printer attached, and the first test needs no build, no install and no administrator |
 | 10. native ARM64 verification | `scripts/verify-native.sh` | done for the binaries and the chain; the print-time process check needs a print |
-| 11. installation | `scripts/install.sh`, `scripts/uninstall.sh` | done, with a dry run that checks the PPD it would install; a real install needs `sudo` |
+| 11. installation | `scripts/install.sh`, `scripts/uninstall.sh` | done, with a dry run that checks the PPD it would install - the diff against HP's, CUPS's own conformance test, and `scripts/ppd-compare.py`, which drives cupsfilter with that PPD and requires the same raster as HP's byte for byte; a real install needs `sudo` |
 
 Phase 9 is the one that is blocked outright, and it needs the printer. Phases 5, 10 and 11 each
 have a part that only a print or a `sudo` install can complete. Nothing else is deferred, and
@@ -290,6 +290,16 @@ Verified by execution, on real captured data where it matters:
   framing on and off.
 - The filter's option parsing, and the PPD generator (its output differs from HP's PPD by
   exactly the intended lines).
+- **The generated PPD, as CUPS itself reads it.** `scripts/ppd-compare.py` generates the file
+  install.sh would install, drives `cupsfilter` with it for six option combinations - defaults,
+  three page sizes, the resolution choice that moves the `cupsCompression` marker, and a media
+  type that moves the header's media string - and requires the raster to be byte-identical to
+  HP's PPD's for the same document. All six match, and `/usr/bin/cupstestppd`, CUPS's own
+  conformance test, reports no failures. This is also the comparison that caught the file being
+  unopenable: a PPD whose first line is a comment makes cupsfilter fall back to its built-in
+  conversion rules - 100 dpi, one bit per pixel, 119,500 bytes for the test page, against
+  31,361,800 for the real thing - instead of refusing, so a queue installed from it would have
+  printed the fallback page rather than reporting a problem.
 - The PPD option mapping, tested against the real value names from the installed PPD:
   `Duplex=DuplexNoTumble`/`DuplexTumble`/`None` and the IPP `sides=` spellings of the same
   choices, `InputSlot=Manual` to the tray code, `pjlDensity` clamped to the 1..5 the PPD
