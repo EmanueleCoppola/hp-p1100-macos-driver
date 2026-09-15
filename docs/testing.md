@@ -146,6 +146,49 @@ padding rules, the PJL framing and its stripping, the CUPS raster page walk and 
 trip, the full raster-to-job chunk sequence, and the filter's option parsing. Neither route
 covers what needs the printer, which is what the hardware sections below are for.
 
+## One command that runs everything
+
+`scripts/verify-all.sh` runs every check in this repository and prints what each one said:
+
+```text
+build and tests:
+  native build                             ok
+  tests, native, whole suite               ok
+  tests, wasm, the same suite              ok
+  clippy                                   ok
+  rustfmt                                  ok
+
+what the machine can see:
+  native ARM64 check, with HP control      ok
+  pre-flight self-test                     ok
+
+correctness against the references:
+  whole job vs the reference driver        ok
+  JBIG encoder vs the reference            ok
+
+the CUPS boundary, and the shape of the install:
+  rehearsal, JBIG path                     ok
+  rehearsal, uncompressed path             ok
+  rehearsal, with PPD options              ok
+  PPD the installer would write            ok
+  uninstall, dry run                       ok
+
+the scripts themselves:
+  python scripts parse                     ok
+  shell scripts parse                      ok
+  node scripts parse                       ok
+
+everything passed.
+```
+
+It needs no privileges and writes nothing outside the repository and one scratch directory, so
+it is safe to run at any point. `--quick` skips the two reference comparisons, which are the slow
+part - a minute or so becomes a few seconds - and it exits non-zero if anything fails, showing the
+last few lines of what the failing check said.
+
+Two things it deliberately does not cover, because they need the printer or an administrator:
+attaching the device, and installing the queue. Both are further down this document.
+
 ## Tools available right now
 
 | tool | status |
