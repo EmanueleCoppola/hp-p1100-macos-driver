@@ -9,7 +9,9 @@ use p1102_protocol::{
     duplex as zduplex, media, op, paper, pjl_epilogue, pjl_prologue, source, Encoder, Items,
     JobOptions, PageGeometry, PjlSettings, Reserved, JBIG_BID_MAX, JBIG_BIH_LEN,
 };
-use p1102_raster::{to_mono1, PageHeader, RasterError, RasterStream, DEFAULT_THRESHOLD};
+use p1102_raster::{
+    to_mono1, to_two_bit_planes, PageHeader, RasterError, RasterStream, DEFAULT_THRESHOLD,
+};
 
 use p1102_jbig::JbigEncoder;
 
@@ -45,6 +47,10 @@ pub struct Options {
     pub duplex: u32,
     pub encoding: ImageEncoding,
     pub threshold: u8,
+    /// A tone table to screen grey through, HP's own, which makes the page two bits per
+    /// pixel instead of one. `scripts/hp-tone-table.py --out DIR` writes these files out of
+    /// the installed driver; `None` is the one-bit thresholding path.
+    pub tone_table: Option<Vec<u8>>,
     /// Override `DMPAPER`; `None` derives it from the raster's page size name.
     pub paper: Option<u32>,
 }
@@ -61,6 +67,7 @@ impl Default for Options {
             duplex: zduplex::OFF,
             encoding: ImageEncoding::Jbig,
             threshold: DEFAULT_THRESHOLD,
+            tone_table: None,
             paper: None,
         }
     }
@@ -74,6 +81,8 @@ pub enum Error {
     Io(String),
     /// The raster stream contained no pages.
     NoPages,
+    /// A combination of options this build cannot produce.
+    Unsupported(String),
 }
 
 impl From<RasterError> for Error {
@@ -95,6 +104,7 @@ impl std::fmt::Display for Error {
             Error::Jbig(e) => write!(f, "compressing the page image: {e}"),
             Error::Io(e) => write!(f, "writing the job: {e}"),
             Error::NoPages => write!(f, "the raster stream contained no pages"),
+            Error::Unsupported(what) => write!(f, "{what}"),
         }
     }
 }
@@ -279,6 +289,9 @@ pub fn geometry(header: &PageHeader, opts: &Options) -> PageGeometry {
     g.duplex = opts.duplex;
     g.econo_mode = opts.econo_mode;
     g.source = opts.source;
+    // Two-bit screening changes the page's depth, and the items follow from it: VIDEO_BPP,
+    // VIDEO_X and NBIE all come from `bits_per_pixel`.
+    g.bits_per_pixel = if opts.tone_table.is_some() { 2 } else { 1 };
     // The media type code the PPD put into the raster header is the authoritative one for
     // the medium that was actually selected, so it is forwarded rather than re-derived
     // from the option name. Falls back to standard when it is unset.
@@ -324,8 +337,37 @@ fn write_image(
     pixels: &[u8],
     opts: &Options,
 ) -> Result<(), Error> {
-    let mono = to_mono1(header, pixels, opts.threshold)?;
-    write_mono_image(enc, header.jbig_width(), header.cups_height, &mono, opts)
+    let Some(table) = opts.tone_table.as_deref() else {
+        let mono = to_mono1(header, pixels, opts.threshold)?;
+        return write_mono_image(enc, header.jbig_width(), header.cups_height, &mono, opts);
+    };
+    if opts.encoding != ImageEncoding::Jbig {
+        return Err(Error::Unsupported(
+            "the two-bit page is only produced as a JBIG image; the raw image layout for two \
+             planes has not been established"
+                .into(),
+        ));
+    }
+    // Two bits per pixel, screened through HP's table: two planes, each one bit of the level
+    // with the most significant plane first, and without LRLTWO, which is the configuration
+    // the reference encoder uses for a multi-plane image and the one the two-plane sweep
+    // checks. See docs/differences.md item 11.
+    let planes = to_two_bit_planes(header, pixels, table)?;
+    let refs: [&[u8]; 2] = [&planes[0], &planes[1]];
+    let mut jbig = JbigEncoder::with_options(
+        header.jbig_width(),
+        header.cups_height,
+        p1102_jbig::DEFAULT_L0,
+        p1102_jbig::DEFAULT_ORDER,
+        p1102_jbig::DEFAULT_OPTIONS & !p1102_jbig::OPT_LRLTWO,
+    )
+    .planes(2);
+    let bie = jbig.encode_planes(&refs)?;
+    debug_assert!(bie.len() >= JBIG_BIH_LEN);
+    let chunks: Vec<&[u8]> = bie[JBIG_BIH_LEN..].chunks(JBIG_BID_MAX).collect();
+    enc.jbig_image(&bie[..JBIG_BIH_LEN], &chunks);
+    enc.end_jbig(opts.duplex);
+    Ok(())
 }
 
 /// The PJL settings a job takes from the options.

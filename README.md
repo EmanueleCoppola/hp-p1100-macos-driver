@@ -227,6 +227,14 @@ item 11), and that page can be built here, which is how the difference gets sett
     p1102 wrap --bih /tmp/twobit/page.bih --bid /tmp/twobit/page.bid \
         --bits 2 --width 4900 --height 6400 -o /tmp/twobit/page.zjs
 
+The same job comes out of one command, through this repository's own conversion and two-plane
+encoder rather than the tool plus the reference encoder, and `scripts/two-bit-compare.py`
+requires the two to agree:
+
+    $PY scripts/hp-tone-table.py --out /tmp/twobit
+    p1102 raster-to-zjs /tmp/1p.raster /tmp/twobit/ours.zjs --2bit \
+        --tone-table /tmp/twobit/sdtahs10.bin
+
 The screening uses the tables out of the installed HP driver, so it is what that driver would
 have sent; the pages are written at the aligned width, and `-b` selects binary rather than
 Gray-coded words in the two planes, which a decoder has to be told because the BIE does not say.

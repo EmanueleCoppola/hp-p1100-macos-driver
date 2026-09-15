@@ -7,6 +7,7 @@
 //! p1102 raster-info   <cups-raster-file>
 //! p1102 raster-to-mono1 <cups-raster-file> <out.raw>
 //! p1102 raster-to-zjs <cups-raster-file> <out.zjs> [--no-pjl]
+//!               [--2bit --tone-table FILE]  screen grey into two bits
 //! p1102 zjs-dump      <zjs-file>
 //! p1102 wrap --bih <file> [--bid <file> ...] --width W --height H --resolution R \
 //!            [--bits N] [--paper-code N] [--no-pjl] -o <out.zjs>
@@ -59,6 +60,7 @@ USAGE:
   p1102 raster-info    <cups-raster-file>
   p1102 raster-to-mono1 <cups-raster-file> <out.raw>
   p1102 raster-to-zjs  <cups-raster-file> <out.zjs> [--no-pjl]
+                       [--2bit --tone-table FILE]
   p1102 test-page      <pattern> [-o <out.zjs>] [--page letter|a4|legal] [--dpi N]
                                   [--raw] [--no-pjl] [--list]
   p1102 zjs-dump       <zjs-file>
@@ -222,14 +224,39 @@ fn zjs_dump(args: &[String]) -> Result<(), String> {
 }
 
 fn raster_to_zjs(args: &[String]) -> Result<(), String> {
-    let positional: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
+    // The table path is a value, not a positional argument, so it is left out of the list.
+    let table_path = args
+        .iter()
+        .position(|a| a == "--tone-table")
+        .and_then(|i| args.get(i + 1));
+    let positional: Vec<&String> = args
+        .iter()
+        .filter(|a| !a.starts_with('-') && Some(*a) != table_path)
+        .collect();
     let (inp, outp) = match positional.as_slice() {
         [i, o] => (*i, *o),
-        _ => return Err("raster-to-zjs needs <in> <out> [--no-pjl]".into()),
+        _ => {
+            return Err(
+                "raster-to-zjs needs <in> <out> [--no-pjl] [--2bit --tone-table FILE]".into(),
+            )
+        }
     };
     let raster = read_file(inp)?;
+    // --2bit screens the page through HP's own tone table instead of thresholding it, which
+    // makes the job two bits per pixel. The table comes from the installed driver:
+    // scripts/hp-tone-table.py --out DIR.
+    let tone_table = match args.iter().position(|a| a == "--tone-table") {
+        Some(i) => Some(read_file(
+            args.get(i + 1).ok_or("--tone-table needs a path")?,
+        )?),
+        None => None,
+    };
+    if args.iter().any(|a| a == "--2bit") && tone_table.is_none() {
+        return Err("--2bit needs --tone-table FILE (scripts/hp-tone-table.py --out DIR)".into());
+    }
     let opts = JobOpts {
         pjl: !args.iter().any(|a| a == "--no-pjl"),
+        tone_table,
         ..JobOpts::default()
     };
     let job = encode_raster_job(&raster, &opts).map_err(|e| e.to_string())?;
