@@ -1,6 +1,8 @@
 # The existing (HP) driver stack
 
-Target device: **HP LaserJet Professional P1102**, connected over USB.
+Target device: **HP LaserJet Professional P1102**, connected over USB - the reference model
+of the HP LaserJet Professional P1100 family this repository's driver targets, and the one
+it is currently tested on.
 
 > Note on scope. The original request named an HP LaserJet P1005. This machine has
 > no P1005 queue and no P1005 device record anywhere in CUPS; the only HP LaserJet
@@ -111,7 +113,7 @@ CoreFoundation.
 | backend/usb | libcups.2, IOKit, SystemConfiguration, Security, libresolv.9, libiconv.2, libz.1 |
 | HP rastertozjs | **libcups.2, libcupsimage.2, libstdc++.6**, Foundation, Accelerate, libobjc |
 | HP usbink | libcups.2, IOKit, AppKit, Foundation, libobjc |
-| our p1102-filter | **only `/usr/lib/libSystem.B.dylib`** |
+| our p1100-filter | **only `/usr/lib/libSystem.B.dylib`** |
 
 Three things this table shows that are worth stating plainly.
 

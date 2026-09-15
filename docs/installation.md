@@ -4,15 +4,15 @@
 
 Four files, all under a directory we own, plus one new CUPS queue:
 
-    /Library/Printers/p1102/p1102-filter    our ARM64 CUPS filter
-    /Library/Printers/p1102/p1102.ppd       generated PPD pointing at that filter
-    /Library/Printers/p1102/p1102-400.tones, p1102-600.tones
-                                            the two tone tables the p1102Grey option needs,
+    /Library/Printers/p1100/p1100-filter    our ARM64 CUPS filter
+    /Library/Printers/p1100/p1100.ppd       generated PPD pointing at that filter
+    /Library/Printers/p1100/p1100-400.tones, p1100-600.tones
+                                            the two tone tables the p1100Grey option needs,
                                             read out of the installed HP driver
-    /Library/Printers/p1102/p1102.icns      the picture the printer row shows
-    CUPS queue: HP_LaserJet_P1102_native    new queue, inherits the existing device URI
+    /Library/Printers/p1100/p1100.icns      the picture the printer row shows
+    CUPS queue: HP_LaserJet_P1100_native    new queue, inherits the existing device URI
 
-Nothing outside /Library/Printers/p1102 is written. Specifically:
+Nothing outside /Library/Printers/p1100 is written. Specifically:
 
 - /Library/Printers/hp/** - HP's filters, frameworks, PPDs and utility - is only ever
   *read*. The source PPD is opened read-only to generate ours.
@@ -35,11 +35,11 @@ hand if you want to.
 
 A PPD's *cupsFilter line names the program by absolute path:
 
-    *cupsFilter: "application/vnd.cups-raster 100 /Library/Printers/p1102/p1102-filter"
+    *cupsFilter: "application/vnd.cups-raster 100 /Library/Printers/p1100/p1100-filter"
 
 When a job reaches the raster step, cupsd runs that program as
 
-    p1102-filter job-id user title copies options file
+    p1100-filter job-id user title copies options file
 
 feeding application/vnd.cups-raster on stdin and sending whatever the program writes to
 stdout on to the usb backend. There is no registration step and no registry: the path in
@@ -60,7 +60,7 @@ scripts/make-ppd.py reads the installed PPD and changes only the driver wiring:
 | *APPrinterUtilityPath is dropped | that is HP's utility app |
 | *APPrinterIconPath is repointed at our icns | so the row shows a picture we ship, rather than one of HP's read out of HP's directory |
 | *NickName gains a " (native ARM64)" suffix, and the localised NickName translation keys follow it | so the two queues are distinguishable in the UI, without breaking localisation |
-| *OpenUI *p1102Grey is added, with a label in every language the PPD declares | the two-bit grey screening is ours rather than HP's, and a PPD that declares languages has to translate its own options - CUPS's conformance test fails every one that is missing |
+| *OpenUI *p1100Grey is added, with a label in every language the PPD declares | the two-bit grey screening is ours rather than HP's, and a PPD that declares languages has to translate its own options - CUPS's conformance test fails every one that is missing |
 
 Everything else is byte-for-byte the same file. You can see the exact diff before
 installing anything - the script only reads, and writes a new file:
@@ -68,9 +68,9 @@ installing anything - the script only reads, and writes a new file:
     PYTHON=/opt/homebrew/bin/python3.13
     $PYTHON scripts/make-ppd.py \
         /etc/cups/ppd/HP_LaserJet_Professional_P1102.ppd \
-        /Library/Printers/p1102/p1102-filter /tmp/p1102.ppd \
-        --icon /Library/Printers/p1102/p1102.icns     # as install.sh calls it
-    diff /etc/cups/ppd/HP_LaserJet_Professional_P1102.ppd /tmp/p1102.ppd
+        /Library/Printers/p1100/p1100-filter /tmp/p1100.ppd \
+        --icon /Library/Printers/p1100/p1100.icns     # as install.sh calls it
+    diff /etc/cups/ppd/HP_LaserJet_Professional_P1102.ppd /tmp/p1100.ppd
 
 Apple's /usr/bin/python3 is a shim that refuses to run until the Xcode licence is
 accepted, hence the PYTHON= above. install.sh warns about that rather than failing
@@ -117,12 +117,12 @@ all, and `--from FILE` builds it from a PNG of your own; the installer takes `--
 install a different one:
 
     PYTHON=/opt/homebrew/bin/python3.13
-    $PYTHON scripts/make-icns.py                    # rewrite assets/p1102.icns
+    $PYTHON scripts/make-icns.py                    # rewrite assets/p1100.icns
     $PYTHON scripts/make-icns.py --drawn            # the code-drawn picture instead
     $PYTHON scripts/make-icns.py --from my-art.png  # from a picture of your own
     $PYTHON scripts/make-icns.py --out /tmp/i.icns  # somewhere else, to compare first
 
-The checked-in `assets/p1102.icns` came from an earlier revision of the badge drawing: rebuilding
+The checked-in `assets/p1100.icns` came from an earlier revision of the badge drawing: rebuilding
 it now changes about 15,000 of the 1.8 million pixels across the container's ten slices, every one
 of them inside a small box around the badge - 2 to 3% of the frame area, in the same place at every
 size. Two runs of the script agree byte for byte, so this is a stale artifact rather than a
@@ -169,12 +169,12 @@ reaches `lpadmin`.
 
 Options:
 
-    --queue NAME        queue to create              (default HP_LaserJet_P1102_native)
+    --queue NAME        queue to create              (default HP_LaserJet_P1100_native)
     --source-queue N    queue to inherit the device URI and PPD from
                                                      (default HP_LaserJet_Professional_P1102)
     --device URI        use this device URI instead of reading it from the source queue
     --force             replace an existing queue of the same name
-    --dest DIR          where to install         (default /Library/Printers/p1102)
+    --dest DIR          where to install         (default /Library/Printers/p1100)
     --no-queue          install the files and stop; no lpadmin, and no root needed
 
 With `--dest` and `--no-queue` the whole install runs without privileges into a directory of
@@ -192,7 +192,7 @@ guard against a mistyped path.
     ./scripts/uninstall.sh --dry-run     # review
     sudo ./scripts/uninstall.sh
 
-That deletes the queue and removes /Library/Printers/p1102. HP's queue, files and receipts
+That deletes the queue and removes /Library/Printers/p1100. HP's queue, files and receipts
 are left alone.
 
 `uninstall.sh` takes the same `--dest` as the installer, and refuses to delete a path that is
@@ -202,22 +202,22 @@ destination without root, the same way the installer does.
 ## Verifying an install
 
     # the installed filter must be native
-    file /Library/Printers/p1102/p1102-filter     # expect Mach-O 64-bit executable arm64
+    file /Library/Printers/p1100/p1100-filter     # expect Mach-O 64-bit executable arm64
 
     # the queue exists and points at our PPD
-    lpstat -v HP_LaserJet_P1102_native
-    grep cupsFilter /etc/cups/ppd/HP_LaserJet_P1102_native.ppd
+    lpstat -v HP_LaserJet_P1100_native
+    grep cupsFilter /etc/cups/ppd/HP_LaserJet_P1100_native.ppd
 
     # and it points the icon at ours, which is installed beside it
-    grep APPrinterIconPath /etc/cups/ppd/HP_LaserJet_P1102_native.ppd
-    file /Library/Printers/p1102/p1102.icns     # expect "Mac OS X icon"
+    grep APPrinterIconPath /etc/cups/ppd/HP_LaserJet_P1100_native.ppd
+    file /Library/Printers/p1100/p1100.icns     # expect "Mac OS X icon"
 
     # CUPS's own conformance test, against the file as it was installed
-    /usr/bin/cupstestppd /etc/cups/ppd/HP_LaserJet_P1102_native.ppd     # expect "PASS"
+    /usr/bin/cupstestppd /etc/cups/ppd/HP_LaserJet_P1100_native.ppd     # expect "PASS"
 
     # print something and watch the job
-    lp -d HP_LaserJet_P1102_native /path/to/file.pdf
-    lpstat -o HP_LaserJet_P1102_native
+    lp -d HP_LaserJet_P1100_native /path/to/file.pdf
+    lpstat -o HP_LaserJet_P1100_native
 
     # CUPS writes filter stderr to the job log
     log show --predicate 'process == "cupsd"' --last 5m
@@ -255,8 +255,8 @@ in docs/testing.md and then this installer are for.
 
 If a script fails halfway, this fully reverses it:
 
-    lpadmin -x HP_LaserJet_P1102_native     # ignore an error if it does not exist
-    sudo rm -rf /Library/Printers/p1102
+    lpadmin -x HP_LaserJet_P1100_native     # ignore an error if it does not exist
+    sudo rm -rf /Library/Printers/p1100
 
 ## Before you install: test the printer without building anything
 
@@ -267,9 +267,9 @@ Apple's own USB backend on a raw queue - no PPD, no filters, bytes to the printe
 
     PY=/opt/homebrew/bin/python3.13
     $PY scripts/make-test-job.py --pattern square --page a4 -o /tmp/square.zjs --verify
-    sudo lpadmin -p P1102_raw -E -v '<device URI from lpstat -v>' -m raw
-    lp -d P1102_raw -o raw /tmp/square.zjs
-    sudo lpadmin -x P1102_raw          # remove it again
+    sudo lpadmin -p P1100_raw -E -v '<device URI from lpstat -v>' -m raw
+    lp -d P1100_raw -o raw /tmp/square.zjs
+    sudo lpadmin -x P1100_raw          # remove it again
 
 That exercises the printer protocol, the framing and the USB path in isolation. Only once
 a page prints is installing the filter worth it. See docs/testing.md for what each step

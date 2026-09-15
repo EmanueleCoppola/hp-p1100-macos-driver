@@ -94,7 +94,7 @@ and HP does not have are exactly those.
 So the two wrappers differ in both directions, and we follow the reference in both: no
 `JOB NAME`, no `ENTER LANGUAGE`, no `EOJ`, plus `ECONOMODE`, `RET=MEDIUM`, `USTATUS TIMED`
 and the `JOBATTR` line. The one-line discriminator, if a hardware test ever needs it, is
-that the reference's payload can be sent with and without its wrapper (`P1102_NO_PJL=1`),
+that the reference's payload can be sent with and without its wrapper (`P1100_NO_PJL=1`),
 which separates "the printer rejects our framing or image" from "the printer wants a
 different wrapper".
 
@@ -415,7 +415,7 @@ is a setting the queue would show, accept and never pass to the printer.
 
 CUPS hands the filter 8 bits per pixel of grey (`cupsBitsPerColor 8`, `cupsColorSpace 0`), and
 something has to turn it into what the printer draws. We compare against a fixed threshold of
-128 and pack one bit per pixel, which is what `crates/p1102-raster` has done since the first
+128 and pack one bit per pixel, which is what `crates/p1100-raster` has done since the first
 commit and what the reference driver sends. HP does something else, and the difference is not a
 screen versus a threshold - it is a different bit depth:
 
@@ -447,20 +447,20 @@ cell chosen by grey level - while ours carry one, thresholded at 128. The protoc
 antialiased text and photographs get a hard edge from us where HP would print a dot pattern, and
 the printer would have four levels to work with instead of two.
 
-What matching it would take, and where it stands. The encoder is done: `p1102-jbig` writes
+What matching it would take, and where it stands. The encoder is done: `p1100-jbig` writes
 `planes(n)`, and its two-plane output is byte-identical to the reference encoder's for six pages
 in `scripts/jbig-sweep.py`, with goldens for a one-stripe and a two-stripe page in the crate's
 own tests.
 
 The conversion is implemented twice over, once in `scripts/hp-tone-table.py --convert` and
-once in the library (`p1102_raster::to_two_bit_planes`, reachable as
-`p1102 raster-to-zjs --2bit --tone-table FILE`), and the two are held together by
+once in the library (`p1100_raster::to_two_bit_planes`, reachable as
+`p1100 raster-to-zjs --2bit --tone-table FILE`), and the two are held together by
 `scripts/two-bit-compare.py`: the same page built through our conversion, our two-plane encoder
 and our framing, and through the tool plus the reference encoder, has to come out the same job.
 That check earned its keep immediately - it caught the aligned columns past the page width being
 padded black rather than white, where the one-bit path's padding is white and a zeroed two-bit
-margin is not. It is in the filter too, behind the `p1102Grey` option - `Mono1` by default, `Screened2`
-to ask for this - which reads the two tables from beside its own binary or from `P1102_TONES`.
+margin is not. It is in the filter too, behind the `p1100Grey` option - `Mono1` by default, `Screened2`
+to ask for this - which reads the two tables from beside its own binary or from `P1100_TONES`.
 The installer does both halves: `scripts/make-ppd.py` injects the option group, with `Mono1` as its
 default, and `scripts/install.sh` reads the two tables out of the installed HP driver and installs
 them beside the filter. A machine that has no HP driver left still gets a working queue: only
@@ -501,7 +501,7 @@ Each one maps to an observation the hardware test makes:
 
 | item | what to look for |
 |---|---|
-| 1, PJL wrapper | if nothing prints at all, this is the first suspect; resending the same payload with `P1102_NO_PJL=1` separates a wrapper problem from an image problem |
+| 1, PJL wrapper | if nothing prints at all, this is the first suspect; resending the same payload with `P1100_NO_PJL=1` separates a wrapper problem from an image problem |
 | 2, JBIG configuration | settled, and not a suspect: the options, the order, L0 and the adaptive template all match what HP's encoder is configured with, and the compressed image is byte-identical to the reference's. A corrupt or truncated page would point at the framing or at the printer's own decoder |
 | 4, command path | absent supplies reporting is visible in the print dialog, not in printing |
 | 5, duplex | send a two-page job with `Duplex=DuplexNoTumble`: the printer should prompt to flip the stack ("press the Go button"), and the back of each sheet should be the right way up, which CUPS's rotation has already arranged. Single-sided output with no prompt would mean the job needs host-side page *pairing*, not rotation |

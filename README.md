@@ -1,7 +1,10 @@
-# p1102-drivers
+# p1100-drivers
 
-A native Apple Silicon replacement for the Intel-only HP driver that drives the
-**HP LaserJet Professional P1102**.
+A native Apple Silicon replacement for the Intel-only HP driver of the
+**HP LaserJet Professional P1100** family: an open-source macOS driver implementation for
+the HP LaserJet Professional P1100 printer family. Its generic implementation was
+reverse-engineered and tested against an **HP LaserJet Professional P1102**, which is the
+one model it is currently tested on.
 
 Status: the existing stack is documented, the printer protocol is understood and
 specified, and a dependency-free Rust stack exists with the raster-to-job pipeline, a JBIG
@@ -15,6 +18,20 @@ code, and the whole page checked against the reference encoder by `scripts/two-b
 behind an option, with the one-bit path still the default. **Nothing has been validated on
 hardware yet** -
 the printer has never been attached during this work.
+
+## Models
+
+The family is the series HP's own driver bundle covers with one PPD and one filter:
+`hp1100.ppd` declares P1102, P1104, P1106, P1107, P1108 and P1109, and CUPS picks the model
+by matching the attached device's IEEE 1284 identity against those lines. Nothing in the
+pipeline here is tied to one model - the PPD carries the device description, the raster
+header carries the page setup, and the wire format is the same across the series - so
+another model in the family should work.
+
+**Currently tested on a P1102 only**, and not on hardware at all yet. Every measurement in
+these pages was taken with that model, against the P1100-family PPD and filter bundle HP's
+driver installs; compatibility with the rest of the series is expected rather than
+established.
 
 scripts/make-test-job.py builds complete, reference-correct ZjStream jobs independently of
 the filter, which is useful for bring-up: it can emit either a payload compressed by the
@@ -74,14 +91,14 @@ middle stage is ours.
 
 ## Repository layout
 
-    crates/p1102-protocol/   ZjStream encoder + decoder. Pure, no dependencies.
-    crates/p1102-raster/     CUPS raster reader and mono conversion. No libcups.
-    crates/p1102-job/        CUPS raster stream -> complete printer job. No CUPS.
-    crates/p1102-jbig/       JBIG (T.82) compressor for the page image. Pure.
-    crates/p1102-filter/     The CUPS filter binary: a thin wrapper around p1102-job.
-    crates/p1102-cli/        Offline tooling: inspect rasters, dump streams, encode a job.
+    crates/p1100-protocol/   ZjStream encoder + decoder. Pure, no dependencies.
+    crates/p1100-raster/     CUPS raster reader and mono conversion. No libcups.
+    crates/p1100-job/        CUPS raster stream -> complete printer job. No CUPS.
+    crates/p1100-jbig/       JBIG (T.82) compressor for the page image. Pure.
+    crates/p1100-filter/     The CUPS filter binary: a thin wrapper around p1100-job.
+    crates/p1100-cli/        Offline tooling: inspect rasters, dump streams, encode a job.
     scripts/                 inspection tools, test runner, PPD generator, installer.
-    assets/p1102.icns        the printer icon the queue shows, built by scripts/make-icns.py
+    assets/p1100.icns        the printer icon the queue shows, built by scripts/make-icns.py
                              (docs/installation.md says from what, and how closely the checked-in
                              file matches a fresh build).
     docs/                    findings, written as they are confirmed.
@@ -137,8 +154,8 @@ Install (see docs/installation.md for what lands where, and why):
 
 Print:
 
-    lp -d HP_LaserJet_P1102_native /path/to/file.pdf
-    lpstat -o HP_LaserJet_P1102_native                  # job state
+    lp -d HP_LaserJet_P1100_native /path/to/file.pdf
+    lpstat -o HP_LaserJet_P1100_native                  # job state
     log show --predicate 'process == "cupsd"' --last 5m # the job log, including filter stderr
 
 Remove it again, leaving HP's installation untouched:
@@ -146,7 +163,7 @@ Remove it again, leaving HP's installation untouched:
     ./scripts/uninstall.sh --dry-run
     sudo ./scripts/uninstall.sh
 
-That installs the filter, the printer icon, a generated PPD and the tone tables it reads into /Library/Printers/p1102, and creates a new
+That installs the filter, the printer icon, a generated PPD and the tone tables it reads into /Library/Printers/p1100, and creates a new
 queue alongside HP's. HP's installation is read but never written, SIP is untouched, and no
 kernel or system extension is involved.
 
@@ -156,12 +173,12 @@ kernel or system extension is involved.
 Homebrew Python is needed for the scripts, because Apple's /usr/bin/python3 is behind the
 same licence gate.
 
-    p1102 raster-info     <cups-raster-file>
-    p1102 raster-to-mono1 <cups-raster-file> <out.raw>
-    p1102 raster-to-zjs   <cups-raster-file> <out.zjs> [--no-pjl]
-    p1102 zjs-dump        <zjs-file>
-    p1102 send <job.zjs> [--device URI] [--timeout SECS]   # through Apple's backend
-    p1102 wrap --bih <file> --bid <file> ... --width W --height H -o out.zjs
+    p1100 raster-info     <cups-raster-file>
+    p1100 raster-to-mono1 <cups-raster-file> <out.raw>
+    p1100 raster-to-zjs   <cups-raster-file> <out.zjs> [--no-pjl]
+    p1100 zjs-dump        <zjs-file>
+    p1100 send <job.zjs> [--device URI] [--timeout SECS]   # through Apple's backend
+    p1100 wrap --bih <file> --bid <file> ... --width W --height H -o out.zjs
 
     PY=/opt/homebrew/bin/python3.13
     $PY scripts/macho.py info   <file>          # architecture, min OS, uuid, entry
@@ -185,8 +202,8 @@ same licence gate.
 The real tool can also be built and run without a compiler, because wasm links with Rust's
 own linker and needs no SDK:
 
-    cargo build --target wasm32-wasip1 -p p1102-cli --offline
-    node scripts/wasi-run.mjs target/wasm32-wasip1/debug/p1102.wasm test-page square -o /tmp/x.zjs
+    cargo build --target wasm32-wasip1 -p p1100-cli --offline
+    node scripts/wasi-run.mjs target/wasm32-wasip1/debug/p1100.wasm test-page square -o /tmp/x.zjs
 
 That is how the Rust implementation was checked against the reference without the licence:
 all eight test pages come out byte-identical to the reference-verified Python path, and the
@@ -202,7 +219,7 @@ See the wasm section in docs/testing.md, including a caveat about node's WASI.
 
 ## Framing an image the reference encoder compressed
 
-`p1102 wrap` builds a complete job around a JBIG image our own encoder did not produce. That is
+`p1100 wrap` builds a complete job around a JBIG image our own encoder did not produce. That is
 what separates "the printer rejects our framing" from "the printer rejects our compression": a
 page the reference implementation compressed goes out as a normal job, and the pieces come
 straight out of that encoder's output, because its BIH is byte-identical to ours for the same
@@ -213,9 +230,9 @@ page and sits in the first twenty bytes:
     ./scripts/jbig-oracle.sh encode /tmp/ref-in.pbm /tmp/ref.jbg
     dd if=/tmp/ref.jbg bs=1 count=20 of=/tmp/ref.bih
     dd if=/tmp/ref.jbg bs=1 skip=20 of=/tmp/ref.bid
-    p1102 wrap --bih /tmp/ref.bih --bid /tmp/ref.bid --width 4900 --height 6400 \
+    p1100 wrap --bih /tmp/ref.bih --bid /tmp/ref.bid --width 4900 --height 6400 \
         -o /tmp/ref.zjs
-    p1102 zjs-dump /tmp/ref.zjs
+    p1100 zjs-dump /tmp/ref.zjs
 
 `--width` is the page's true pixel width; the 128-pixel alignment the printer expects is added
 by the wrapper. The result is an ordinary job file, so it goes to the printer the same way any
@@ -231,7 +248,7 @@ item 11), and that page can be built here, which is how the difference gets sett
     ./scripts/jbig-oracle.sh encode /tmp/twobit/page-1.pgm /tmp/twobit/page.jbg -b -p 28
     dd if=/tmp/twobit/page.jbg bs=1 count=20 of=/tmp/twobit/page.bih
     dd if=/tmp/twobit/page.jbg bs=1 skip=20 of=/tmp/twobit/page.bid
-    p1102 wrap --bih /tmp/twobit/page.bih --bid /tmp/twobit/page.bid \
+    p1100 wrap --bih /tmp/twobit/page.bih --bid /tmp/twobit/page.bid \
         --bits 2 --width 4900 --height 6400 -o /tmp/twobit/page.zjs
 
 The same job comes out of one command, through this repository's own conversion and two-plane
@@ -239,7 +256,7 @@ encoder rather than the tool plus the reference encoder, and `scripts/two-bit-co
 requires the two to agree:
 
     $PY scripts/hp-tone-table.py --out /tmp/twobit
-    p1102 raster-to-zjs /tmp/1p.raster /tmp/twobit/ours.zjs --2bit \
+    p1100 raster-to-zjs /tmp/1p.raster /tmp/twobit/ours.zjs --2bit \
         --tone-table /tmp/twobit/sdtahs10.bin
 
 The screening uses the tables out of the installed HP driver, so it is what that driver would
@@ -260,7 +277,7 @@ The request had eleven phases. Where each one landed, and what its evidence is:
 |---|---|---|
 | 1. inventory the installed stack | `docs/existing-driver.md` | done, from `lpstat`, `ioreg`, the registry, `pkgutil` and the files themselves |
 | 2. find the obsolete Intel component | `docs/existing-driver.md` component table | done: 337 Mach-O binaries in the HP installation, none with an arm64 slice |
-| 3. determine the protocol | `docs/protocol.md`, `crates/p1102-protocol` | done, and the encoder's output is byte-identical to the reference driver's for the same page |
+| 3. determine the protocol | `docs/protocol.md`, `crates/p1100-protocol` | done, and the encoder's output is byte-identical to the reference driver's for the same page |
 | 4. check for a known open protocol | `docs/research.md` | done: the reference implementation is built and run here as a test oracle |
 | 5. firmware handling | `docs/protocol.md` | resolved for this bundle (no firmware blob, none uploaded); the device side needs the printer |
 | 6. design the replacement | `docs/architecture.md` | done: PPD plus filter, chosen explicitly over a Printer Application and re-hosting kept cheap |
@@ -280,7 +297,7 @@ device.
 Verified by execution, on real captured data where it matters:
 
 - The ZjStream byte layout: chunk and item headers, big-endian field placement,
-  reserved = 12 x items, item ordering for every chunk the P1102 path uses, JBIG chunk
+  reserved = 12 x items, item ordering for every chunk the driver emits, JBIG chunk
   padding rules, the 4-byte JZJZ stream signature, and the PJL framing.
 - The CUPS raster reader, including a header round trip, and that decoded geometry
   accounts for every byte of the stream.
@@ -321,9 +338,9 @@ Verified by execution, on real captured data where it matters:
   `*Default*` keywords fill the rest and the command line overrides them.
 - **The bring-up tool, against the shipped framing and against CUPS.**
   `scripts/bringup-compare.py` builds each test page with `scripts/make-test-job.py` - the tool a
-  hardware session uses first, whose Python framing mirrors `crates/p1102-protocol` - has
-  `p1102 wrap` frame the same reference-compressed image with the Rust code, and asks
-  `p1102 test-page` for the same pattern. All three agree in all ten cases, byte for byte, so a
+  hardware session uses first, whose Python framing mirrors `crates/p1100-protocol` - has
+  `p1100 wrap` frame the same reference-compressed image with the Rust code, and asks
+  `p1100 test-page` for the same pattern. All three agree in all ten cases, byte for byte, so a
   printer that rejects a test page is rejecting what the filter sends. The same script checks what
   each test page claims about the page against the job the filter builds from a real CUPS raster of
   that size, which is how both Rust and Python tables were found to be giving Legal 8100 px where a
@@ -392,10 +409,10 @@ Not verified:
    reference encoder produced, and Apple's own `usb` backend takes it from there - no build,
    no install and **no administrator**, because a backend is an ordinary executable that
    reads its device URI from the environment. If the page does not print, the next question
-   is the wrapper: `P1102_NO_PJL=1`, or `make-test-job.py --no-pjl`, sends the same payload
+   is the wrapper: `P1100_NO_PJL=1`, or `make-test-job.py --no-pjl`, sends the same payload
    without it. A raw queue, with `sudo`, then tests those same bytes through CUPS's own chain
    rather than around it. Both recipes are in docs/testing.md.
-3. If the compressed image is rejected, `P1102_RAW=1` switches the filter to the
+3. If the compressed image is rejected, `P1100_RAW=1` switches the filter to the
    uncompressed ZJT_RAW_IMAGE form, whose layout is the one thing here with no independent
    confirmation.
 4. Then install the queue with `sudo ./scripts/install.sh` and print through it.
@@ -418,4 +435,4 @@ thing necessarily shared is the normative T.82 arithmetic coder table, which eve
 JBIG implementation must contain.
 
 Say the word if you would rather it were GPL-2.0, or if you want a specific copyright holder
-named instead of "the p1102-drivers authors"; both are one-line changes.
+named instead of "the p1100-drivers authors"; both are one-line changes.

@@ -1,7 +1,9 @@
 # JBIG (ISO/IEC 11544 / ITU-T T.82)
 
-This is the compression the P1102 expects for a page image. Everything below is
-**CONFIRMED** against a working reference implementation, not recalled from memory.
+This is the compression the printer expects for a page image. It was measured on the P1102,
+the model this driver was developed against, and it is what the driver emits. Everything
+below is **CONFIRMED** against a working reference implementation, not recalled from
+memory.
 
 ## Why not JBIG2
 
@@ -164,14 +166,14 @@ our single-layer encoder must not be compared against. Always pass **-d 0** when
 
 ## The implementation
 
-`crates/p1102-jbig` is a port of that verified prototype into pure Rust, with no
+`crates/p1100-jbig` is a port of that verified prototype into pure Rust, with no
 dependencies. Four vectors from the reference encoder are embedded as golden tests and run
 on every build: 8x2, 16x4, an 800x600 image spanning five stripes, and a degenerate 1x200
 single column. The two small ones are checked in **both** configurations, so the template
 switch and the typical-prediction path each have a golden. `scripts/jbig-encode.py` remains
 as the prototype and as an independent cross-check of the Rust code.
 
-`p1102-job` feeds it the same bitmap the uncompressed path would use, and the JBIG line
+`p1100-job` feeds it the same bitmap the uncompressed path would use, and the JBIG line
 length is asserted to equal the raster row stride - a mismatch there would silently shear
 every page rather than fail.
 
