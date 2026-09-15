@@ -196,7 +196,7 @@ attaching the device, and installing the queue. Both are further down this docum
 | `rustc` / `cargo` 1.98.0 | present; links with Xcode's toolchain directly, or with `rust-lld` and the stub SDK |
 | `/opt/homebrew/bin/python3.13`, `python3.10` | present and working |
 | `file`, `xxd`, `hexdump`, `codesign`, `plutil`, `gzcat`, `cupsfilter`, `lpstat` | present and working |
-| our `scripts/macho.py`, `scripts/elfinfo.py`, `scripts/cupsraster.py` | working |
+| our `scripts/macho.py`, `scripts/elfinfo.py`, `scripts/cupsraster.py`, `scripts/hp-tone-table.py` | working |
 | Xcode's own `clang`, `nm`, `otool`, `lipo`, `strings`, `make` | working when called directly with an SDK; see above |
 | `/usr/bin/{clang,cc,otool,nm,lipo,strings,make,python3}` | blocked: these are the gated shims |
 
