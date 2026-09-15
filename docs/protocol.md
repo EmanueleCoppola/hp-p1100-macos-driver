@@ -186,6 +186,38 @@ The reference implementation drives the P1102 as model `2` with flags `-P -z2 -L
   Bitmap scanlines are padded to a 16-byte (128-bit) multiple.
 - `ZJI_VIDEO_X` is `raster_width / bits_per_pixel`; `ZJI_VIDEO_BPP` is 1 for monochrome.
 
+### Page size codes (`ZJI_DMPAPER`)
+
+CUPS puts the PPD's `*PageSize` choice name into the raster header - measured by running
+every size this PPD declares through `cupsfilter` - so the mapping from a job to a code is
+name-based, and the names are the PPD's own: `B5JIS`, `EnvDL`, `16K197x273mm`, `8.5x13Custom`
+and so on. The codes come from the reference driver's table, which is keyed on the same names,
+and each entry below was checked against it **by page geometry** rather than by name.
+
+| PPD `PageSize` | code | | PPD `PageSize` | code |
+|---|---|---|---|---|
+| `Letter` | 1 | | `Env10` | 20 |
+| `Legal` | 5 | | `EnvDL` | 27 |
+| `Executive` | 7 | | `EnvC5` | 28 |
+| `A4` | 9 | | `EnvISOB5` | 34 |
+| `A5` | 11 | | `Monarch` | 37 |
+| `B5JIS` | 13 | | `Postcard` | 43 |
+| `A6` | 70 | | `DoublePostcard` | 82 |
+| `16K197x273mm` | 257 | | `16K184x260mm` | 263 |
+| `16K195x270mm` | 264 | | `8.5x13Custom` | 258 |
+| `Custom` (not a PPD choice; a custom media arrives as this) | 256 | | | |
+
+Geometry is what resolves the near-misses: `EnvISOB5` is 499x709 pt, the 176x250 mm envelope
+rather than ISO B5 paper (259), and `8.5x13Custom` is 612x936 pt, the German legal fanfold
+size (258) rather than an arbitrary custom size. `DoublePostcard` at 567x420 pt is the only
+entry that rests on an orientation convention rather than on a size, so it is **LIKELY** 82.
+
+Eight of these names were missing from the first version of our table, and a job on A5,
+B5JIS, EnvDL, EnvISOB5, a 16K size or 8.5x13Custom would have been sent to the printer as
+Letter. The reference comparison is what caught it, and it now covers seven of these sizes
+end to end; `docs/differences.md` item 6 covers the media *type* codes, which are a separate
+matter.
+
 ## JBIG
 
 **CONFIRMED** compression is standard **ISO/IEC 11544 / ITU-T T.82 JBIG**:

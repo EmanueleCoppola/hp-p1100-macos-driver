@@ -231,6 +231,12 @@ bitmaps with the equivalent flags. The pass condition is **byte identity after r
 the job-attribute line**, which carries the clock; a failure prints the differing items by
 name, because `scripts/zjs-compare.py` is what is doing the explaining.
 
+The case list covers print options (defaults, A4, econo mode, density, manual feed, copies,
+two pages) and page sizes other than Letter and A4 (A5, B5JIS, EnvDL, EnvISOB5, 16K197x273mm,
+8.5x13Custom, DoublePostcard). The page-size cases exist because the raster's page size name
+decides `ZJI_DMPAPER`, and comparing them is how eight names that our table did not carry -
+and which therefore went out as Letter - were found.
+
 Two things are deliberately *not* in the case list, and both are recorded in
 `docs/differences.md`: duplex (the reference reorders and rotates pages host-side, we leave
 that to the printer) and the media code (it reaches us in the raster header, which is set

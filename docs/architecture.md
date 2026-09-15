@@ -156,9 +156,10 @@ template movement); the parameters and their provenance are in `docs/jbig.md`.
 
 **Neither is the wrapper.** The job our filter writes - PJL wrapper, chunk sequence, item
 sets and their order, geometry, compressed image and final-chunk padding - is byte-identical
-to the reference driver's for the same page and options, across seven option combinations
-including a two-page job. The comparison is `scripts/reference-compare.py`, and what it
-cannot cover is listed in `docs/differences.md`.
+to the reference driver's for the same page and options, across fourteen cases: print
+options including a two-page job, and seven page sizes beyond Letter and A4. The comparison
+is `scripts/reference-compare.py`, and what it cannot cover is listed in
+`docs/differences.md`.
 
 The uncompressed `ZJT_RAW_IMAGE` path is also implemented and selectable with
 `P1102_RAW=1`, because whether the printer accepts it is still an open hardware question

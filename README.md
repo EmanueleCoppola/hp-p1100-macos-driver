@@ -229,10 +229,12 @@ Verified by execution, on real captured data where it matters:
 - **The whole job, against a working driver.** `scripts/reference-compare.py` builds the
   open driver that supports this printer and requires our filter's output to be
   byte-identical to its, for the same page and options, once the clock-bearing
-  job-attribute line is removed. Seven cases pass: default Letter, A4, econo mode, density,
-  manual feed, three copies, and a two-page job. That covers the wrapper, the chunk
-  sequence, every item and its order, the geometry, the compressed image and the final
-  padding in one go.
+  job-attribute line is removed. Fourteen cases pass: default Letter, A4, econo mode,
+  density, manual feed, three copies, a two-page job, and seven further page sizes (A5,
+  B5JIS, EnvDL, EnvISOB5, 16K197x273mm, 8.5x13Custom, DoublePostcard) - the last group
+  because the page size name decides the `ZJI_DMPAPER` code. That covers the wrapper, the
+  chunk sequence, every item and its order, the geometry, the page size code, the
+  compressed image and the final padding in one go.
 - **HP's own encoder constants**, read out of its binary rather than assumed: the BIH
   options byte `0x5c`, order `3` and the adaptive-template default are visible in
   `jbig::ZjbigEncoder`'s constructor, and every PJL literal the filter contains is listed in

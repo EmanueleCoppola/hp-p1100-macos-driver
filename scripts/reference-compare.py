@@ -47,6 +47,17 @@ CASES = [
     ('manual feed', ['InputSlot=Manual'], 'InputSlot=Manual', ['-s', '4'], 'text-1p.txt'),
     ('three copies', ['copies=3'], 'copies=3', ['-n', '3'], 'text-1p.txt'),
     ('two pages', [], '', [], 'text-2p.txt'),
+    # Page sizes other than Letter and A4: the raster's page size name decides DMPAPER, so
+    # each of these tests one entry of that mapping against the code the reference uses for
+    # the same page size. B5JIS, EnvDL, A5, the 16K sizes and 8.5x13Custom all used to fall
+    # through the table and be sent as Letter.
+    ('a5', ['PageSize=A5'], '', ['-p', '11'], 'text-1p.txt'),
+    ('b5 jis', ['PageSize=B5JIS'], '', ['-p', '13'], 'text-1p.txt'),
+    ('envelope dl', ['PageSize=EnvDL'], '', ['-p', '27'], 'text-1p.txt'),
+    ('envelope iso b5', ['PageSize=EnvISOB5'], '', ['-p', '34'], 'text-1p.txt'),
+    ('16k 197x273', ['PageSize=16K197x273mm'], '', ['-p', '257'], 'text-1p.txt'),
+    ('8.5x13 custom', ['PageSize=8.5x13Custom'], '', ['-p', '258'], 'text-1p.txt'),
+    ('double postcard', ['PageSize=DoublePostcard'], '', ['-p', '82'], 'text-1p.txt'),
 ]
 
 # Not compared here: the media code. It reaches our filter in the raster header's
