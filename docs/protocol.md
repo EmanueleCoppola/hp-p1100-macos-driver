@@ -422,6 +422,12 @@ the P1005/P1006/P1505/1020 family. **UNKNOWN** without hardware: whether the P11
 needs a host-side firmware download after a power cycle. First thing to observe once the
 printer is attached.
 
+Where they are, measured again just now: the whole P1102 installation is two bundles,
+the utility app and `hpRaster.bundle`, and searching it for `*.acl`, `*firmware*` or
+`*.bin` finds nothing at all. The four .acl images live in the *other* bundle, `hplaserjetzjs.bundle`,
+which serves the P1005/P1006/P1505/1020 family. That is the contrast that makes the
+conclusion above about this printer concrete rather than an absence of evidence.
+
 "No firmware blob" is an exhaustive statement rather than a spot check: searching
 `/Library/Printers` for `*.acl` or for anything shaped like firmware (`.rfu`, `.bin`,
 `.hex`, `.img`, `.fw`, `.dl`) returns exactly those four files, all in that one sibling
