@@ -182,15 +182,27 @@ the printer actually answers, which is the kind of plausible-looking substitute 
 project is trying not to ship.
 
 One nuance, because it is where a future implementation should start if this is ever built:
-CUPS does have a supported way for a *filter* to query the device - the side channel, which
-the reference tree uses in its Konica-Minolta command filter (`cups/sidechannel.h`) to send
-PJL and read the reply, and which Apple's own supplies reporting uses too. HP did not take
-that route for this family even though it was available, and **LIKELY** that is because the
-printer does not report supplies over PJL at all: the toner level on these models lives in
-the embedded web server, which is why the driver goes through the trouble of an HTTP request
-over the bulk pipes. So the first question for a hardware session that wants this feature is
-not "how do I write the filter" but "does the printer answer a PJL supply query", and the
-side channel is what would carry it.
+CUPS gives a filter two different ways to reach the device, and the SDK's headers keep them
+apart.
+
+- The **side channel**, file descriptor 4 (`CUPS_SC_FD` in `cups/sidechannel.h`), carries a
+  *fixed* command set: soft reset, drain, bidirectional capability, IEEE-1284 device ID, device
+  state, SNMP get and get-next, connectivity. There is **no command that writes arbitrary bytes
+  to the device**, so it could not carry HP's HTTP request whatever else it could do. Two of its
+  commands come close to what this feature wants: `GET_STATE` reports the standard condition
+  bits, media and marker low or empty among them, and `SNMP_GET` asks for a Printer MIB OID such
+  as `prtMarkerSuppliesLevel`. Both depend on Apple's `usb` backend asking the printer, which is
+  the thing to establish first. An earlier version of this note said the side channel would
+  carry a PJL supply query; the header says otherwise.
+- The **backchannel** (`cupsBackChannelRead` and `cupsBackChannelWrite`), which is the device's
+  byte stream. That is what the reference tree's Konica-Minolta command filter uses to send PJL
+  and read the reply, and it is what could carry an HTTP request to the printer's embedded web
+  server the way HP's driver does. Whether Apple's `usb` backend lets a filter write *to* the
+  device out of band is not something this machine can answer.
+
+So the first question for a hardware session that wants supplies reporting is not how to write
+the filter but what the printer answers: whether `lpstat -p` shows a paper or toner reason when
+the printer is in that state, which would mean the backend is already asking it.
 
 It also may not be worth building even with hardware: the P1102 is a single-cartridge
 engine whose level reporting is a local web page, and a USB-attached unit has no address
