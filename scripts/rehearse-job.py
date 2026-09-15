@@ -99,6 +99,20 @@ def run_filter(raster_path, options, out_path, raw=False):
         proc = subprocess.run(cmd, stdout=dst, stderr=subprocess.PIPE, env=env)
     return proc.returncode, proc.stderr.decode('utf-8', 'replace').strip(), route
 
+def run_filter_on_stdin(raster_path, options, out_path):
+    """The same job, with the raster on stdin and no input file argument.
+
+    CUPS passes argv[6] for a filter chain, but the filter also accepts its input on stdin
+    (it is how the tool is used by hand), and the two must produce the same bytes - a
+    difference there would mean the streaming reader depends on it being seekable.
+    """
+    prefix, route = filter_command()
+    cmd = prefix if route == 'native' else prefix + [WASM_FILTER]
+    cmd = cmd + ['1', 'manu', 'rehearsal', '1', options]
+    with open(raster_path, 'rb') as src, open(out_path, 'wb') as dst:
+        proc = subprocess.run(cmd, stdin=src, stdout=dst, stderr=subprocess.PIPE)
+    return proc.returncode, proc.stderr.decode('utf-8', 'replace').strip()
+
 
 def expected_pages(raster_bytes, cr):
     """The page bitmaps an independent computation says the raster represents.
@@ -204,6 +218,19 @@ def main(argv):
     print('  2. our %s filter produced a %d byte job' % (route, len(job)))
     for line in stderr.splitlines():
         print('       %s' % line)
+
+    # The other input route, checked against this one: the same raster on stdin, with no file
+    # argument. Compared semantically because the JOBATTR stamp can differ by a second.
+    stdin_path = os.path.join(work, 'stdin.zjs')
+    code, stdin_stderr = run_filter_on_stdin(raster_path, args.options, stdin_path)
+    if code != 0:
+        return fail('the filter exited %d when the raster arrives on stdin\n%s'
+                    % (code, stdin_stderr))
+    diffs = zc.compare(zc.semantic_view(job),
+                       zc.semantic_view(open(stdin_path, 'rb').read()), True)
+    if diffs:
+        return fail('the job differs when the raster arrives on stdin: %s' % diffs)
+    print('       the same job comes out with the raster on stdin')
 
     _, stream, _ = zc.split_framing(job)
     chunks = zc.parse_chunks(stream)

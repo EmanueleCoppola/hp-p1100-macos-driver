@@ -187,15 +187,28 @@ option through the PostScript page device, and `cupsfilter` cannot produce that 
 always carries Paper/1) while the reference takes the code as a flag. The mapping itself is
 covered by a unit test in `crates/p1102-job`; what is unverified is the printer's side.
 
-## 7. Job timestamps. Cosmetic, and the only remaining byte difference
+## 7. Job timestamps. Cosmetic, on a different clock basis
 
-We emit `@PJL SET JOBATTR="JobAttr4=<UTC timestamp>"` from the system clock, which is what
-the reference implementation does too. HP's binary contains no `JOBATTR` literal at all, so
-HP's driver most likely sends no job attribute - an earlier version of this document claimed
-it sent one of its own, which the disassembly does not support.
+We emit `@PJL SET JOBATTR="JobAttr4=<timestamp>"` from the system clock, in the same
+fourteen-digit `YYYYMMDDHHMMSS` shape the reference implementation uses. Its value is ours to
+choose, with one measured difference and one unknown.
 
-This line is what scripts/zjs-compare.py normalises away by default, precisely so that a
-comparison of two jobs is not dominated by it.
+**The clock basis differs: ours is UTC, the reference's is local time.** A run at 21:25 local
+gave `20260915212516` from the reference and `20260915192515` from us, two hours apart.
+`scripts/reference-compare.py` removes this line's value - that is the pass condition - but
+checks its fourteen-digit shape in both jobs and prints both stamps, so the gap stays visible
+instead of being papered over.
+
+HP's binary contains no `JOBATTR` literal at all, so HP's driver most likely sends no job
+attribute - an earlier version of this document claimed it sent one of its own, which the
+disassembly does not support. What HP's accounting used instead is **UNKNOWN**.
+
+This is also the line `scripts/zjs-compare.py` normalises away by default, precisely so that
+a comparison of two jobs is not dominated by it. Nothing on the printer consumes the field,
+and matching the reference's local basis would mean reaching for local time - libc's
+`localtime_r` through `unsafe` FFI, with a `cfg` so the wasm test build still compiles -
+inside a stack that is otherwise pure Rust. That is not a trade worth making for a field the
+printer ignores, so the difference is recorded rather than removed.
 
 It is now the *only* difference the reference comparison finds: every job it covers is
 byte-identical once this line is removed, and the two jobs are the same length.

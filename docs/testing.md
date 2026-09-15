@@ -231,6 +231,12 @@ bitmaps with the equivalent flags. The pass condition is **byte identity after r
 the job-attribute line**, which carries the clock; a failure prints the differing items by
 name, because `scripts/zjs-compare.py` is what is doing the explaining.
 
+That line's *value* is expected to differ - ours is UTC and the reference's is local time, two
+hours apart here - so the harness removes it and then checks that both jobs still carry a
+fourteen-digit one, and prints both stamps. A regression in the format would otherwise hide
+behind the removal that makes the comparison possible; `docs/differences.md` item 7 has the
+reason the bases differ.
+
 The case list covers print options (defaults, A4, econo mode, density, manual feed, copies,
 two pages, both resolutions) and **every page size the PPD declares**, plus a custom one.
 The page-size cases exist because the raster's page size name decides `ZJI_DMPAPER`, and
@@ -443,9 +449,10 @@ DEBUG: argv[6]=<input file>
 ```
 
 That is exactly what p1102-filter implements: options at argv[5], the input file at argv[6],
-and stdin when there is no file. Both routes are exercised by the rehearsal, and the option
-strings come from the printer's real PPD, so the remaining untested piece is narrow: whether
-cupsd reaches the filter at all with our PPD, which the first real print answers.
+and stdin when there is no file. The rehearsal now runs the raster both ways and requires the
+same job from each, which is what would catch a dependence on the input being seekable. The
+option strings come from the printer's real PPD, so the remaining untested piece is narrow:
+whether cupsd reaches the filter at all with our PPD, which the first real print answers.
 
 
 

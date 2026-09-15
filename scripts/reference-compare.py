@@ -164,7 +164,11 @@ def reference_job(pages, header, flags, work):
     return open(out, 'rb').read()
 
 
-JOBATTR = re.compile(rb'@PJL SET JOBATTR="[^"]*"\x00')
+# The whole line is what the pass condition removes, but its shape is checked: both jobs must
+# carry a fourteen-digit stamp, so a format regression cannot hide behind the removal. The
+# values differ because the two runs happen at different instants - and because ours is UTC
+# while the reference's is local time, which is recorded in docs/differences.md.
+JOBATTR = re.compile(rb'@PJL SET JOBATTR="JobAttr4=(\d{14})"\x00')
 
 
 def without_timestamp(blob):
@@ -193,6 +197,7 @@ def main(argv):
     print()
 
     failures = 0
+    stamps = None
     for label, cups_opts, options, flags, fixture in CASES:
         if args.only and args.only not in label:
             continue
@@ -210,6 +215,14 @@ def main(argv):
         reference = reference_job(pages, page_headers[0], flags, case_dir)
         ours = open(ours_path, 'rb').read()
 
+        stamp = JOBATTR.search(ours)
+        other = JOBATTR.search(reference)
+        if not stamp or not other:
+            raise SystemExit('%s: job-attribute stamp missing or malformed (ours %r, reference %r)'
+                             % (label, stamp.group(1) if stamp else None,
+                                other.group(1) if other else None))
+        if stamps is None:
+            stamps = (stamp.group(1).decode(), other.group(1).decode())
         same = without_timestamp(ours) == without_timestamp(reference)
         print('%-18s %-6s %d pages, %d raster bytes, ours %d bytes, reference %d bytes'
               % (label, 'PASS' if same else 'FAIL', len(pages), size, ours_size,
@@ -226,6 +239,10 @@ def main(argv):
     if failures:
         print('%d case(s) differ' % failures)
         return 1
+    if stamps:
+        print('the timestamp line is the only difference: ours %s (UTC), the reference\'s %s,'
+              % stamps)
+        print('  the same fourteen-digit format on a different clock basis (differences.md 7)')
     print('every case is byte-identical to the reference once the timestamp is removed'
           if not args.keep else 'every case matched; intermediates kept in %s' % work)
     return 0
