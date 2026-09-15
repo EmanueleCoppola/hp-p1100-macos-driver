@@ -251,6 +251,7 @@ def main(argv):
     print()
     if failures:
         print('%d case(s) differ' % failures)
+        print('  its scratch directory is kept for inspection: %s' % work)
         return 1
     if stamps:
         print('the timestamp line is the only difference: ours %s (UTC), the reference\'s %s,'
@@ -258,6 +259,10 @@ def main(argv):
         print('  the same fourteen-digit format on a different clock basis (differences.md 7)')
     print('every case is byte-identical to the reference once the timestamp is removed'
           if not args.keep else 'every case matched; intermediates kept in %s' % work)
+    # Each case leaves a raster of tens of megabytes behind, so a run that passes cleans up
+    # after itself; a failing run keeps the directory for the reader to look at.
+    if not args.keep:
+        shutil.rmtree(work, ignore_errors=True)
     return 0
 
 

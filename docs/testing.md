@@ -236,6 +236,11 @@ filter reads the defaults the job does not name from it: the reference is given 
 choices as flags, so a default the filter failed to pick up would show as a difference rather
 than pass unnoticed.
 
+Every case leaves a raster of tens of megabytes behind, so a run that passes removes its
+scratch directory and a run that fails keeps it - and says where - for inspection. `--keep`
+keeps it either way. `scripts/jbig-sweep.py` does the same; between them they had quietly
+accumulated twenty-five gigabytes before that was noticed.
+
 That line's *value* is expected to differ - ours is UTC and the reference's is local time, two
 hours apart here - so the harness removes it and then checks that both jobs still carry a
 fourteen-digit one, and prints both stamps. A regression in the format would otherwise hide
