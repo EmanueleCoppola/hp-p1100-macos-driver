@@ -90,6 +90,7 @@ CUPS and without a printer.
     ./scripts/test-native.sh       # the full test suite on this machine
     ./scripts/test-wasm.sh         # the same suite on wasm, for a machine with no linker
     ./scripts/build-native.sh      # the real native ARM64 binaries
+    ./scripts/verify-all.sh        # everything in this repository, and what each check said
 
 `scripts/test-native.sh` runs the whole suite on aarch64-apple-darwin, which is the real target;
 it links with Apple's toolchain, or with Xcode's clang called directly when the licence has
