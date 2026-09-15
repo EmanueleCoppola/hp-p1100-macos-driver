@@ -119,14 +119,22 @@ rather than the whole job. That matters at these sizes: a Letter page is 31 MB o
 would be a few kilobytes.
 
 ```text
-raster      before      after
- 31 MB       35.6 MB     35 MB
- 94 MB      103.1 MB     39 MB
-314 MB      312.4 MB     43 MB
+raster      buffering version (measured then)   streaming filter (measured now)
+ 31 MB              35.6 MB                              37.3 MB
+ 94 MB             103.1 MB                              37.4 MB
+314 MB             312.4 MB                              37.5 MB
 ```
 
-Before the change memory tracked the raster exactly; now it is flat. The output is
-byte-identical either way, which is how the refactor was checked.
+The "before" column is the version that accumulated the whole job, measured against it at the
+time; those numbers track the raster exactly. The "after" column is the shipped filter,
+measured the same way for all three sizes - a ten times larger job costs 0.3% more memory, so
+the property is flatness rather than a single figure. Reproduce it with a multi-page raster:
+
+```bash
+/usr/bin/time -l target/release/p1102-filter 1 manu m 1 '' /tmp/ten-page.raster > /dev/null
+```
+
+The output was byte-identical before and after that refactor, which is how it was checked.
 
 
 

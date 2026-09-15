@@ -340,6 +340,14 @@ the P1005/P1006/P1505/1020 family. **UNKNOWN** without hardware: whether the P11
 needs a host-side firmware download after a power cycle. First thing to observe once the
 printer is attached.
 
+"No firmware blob" is an exhaustive statement rather than a spot check: searching
+`/Library/Printers` for `*.acl` or for anything shaped like firmware (`.rfu`, `.bin`,
+`.hex`, `.img`, `.fw`, `.dl`) returns exactly those four files, all in that one sibling
+bundle, and the P1102's own tree holds only its two Mach-O filters, an `Info.plist`, one
+strings file and the utility app. The other side of the question - whether the *device*
+wants firmware pushed to it after a power cycle - is what only the hardware can answer, and
+the reference driver does not push any either.
+
 One caveat against that "no": the device advertises `CMD:...ACL...` in its own IEEE 1284
 identity (above), so it can accept the firmware-upload command set even though this
 machine's driver never uploads anything to it. The reference implementation does not upload

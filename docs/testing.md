@@ -52,13 +52,22 @@ macOS 27.0 (build 26A428), Darwin 27.0.0, Apple M2 Max, arm64
    running here. An earlier version of this file said otherwise, because it checked
    `/usr/lib` for the file; that is not a valid test for a dylib on modern macOS.
 
-4. **No CUPS logging and no readable registry of past jobs.** `/var/log/cups/` contains
-   only `access_log`; there is no `error_log`. `/etc/cups/printers.conf` is mode 600
-   root:_lp and was not read.
+4. **No CUPS job history to read.** `/var/log/cups/` contains only `access_log`; there is no
+   `error_log`. cupsd's messages do reach the unified log - `log show --predicate
+   'process == "cupsd"'` returns its start-up chatter - but a filter invocation in it would
+   need a job to have run, and no job has run in the retained window, so the argv cupsd
+   actually passes could not be observed from here. `/etc/cups/printers.conf` is mode 600
+   root:_lp and was not read. After a real print, the unified log is the first place to look;
+   `docs/installation.md` has the command.
 
 5. `sudo` is not passwordless (`sudo -n true` -> `a password is required`).
 
-### Building natively without Apple's toolchain
+### Building natively
+
+`scripts/build-native.sh` picks one of three routes and prints which one it used: Apple's
+toolchain through the `/usr/bin` shims when the licence has been accepted; Xcode's clang
+called directly with an explicit SDK, which is the route that works on this machine today;
+or `rust-lld` against a rewritten stub SDK, described next.
 
 Rust ships `rust-lld` in its sysroot, so linking without Apple's `cc` was attempted long
 before it worked, and the first diagnosis of why it failed was wrong. The symptom was
@@ -104,19 +113,22 @@ Accepting the Xcode licence remains the supported route, and it also restores `o
 `nm`, `lipo`, `strings` and `brew`. This exists so the project can be built and verified
 without it, not as a replacement for it.
 
-### Working workaround: run tests on wasm32-wasip1
+### Running the tests: natively first, wasm as the fallback
 
-
-### Working workaround: run tests on wasm32-wasip1
-
-Linking wasm needs no SDK, so pure-logic tests do run today:
+`scripts/test-native.sh` runs the whole suite on aarch64-apple-darwin - the real target -
+using Apple's toolchain, or Xcode's clang passed to rustc as the linker when the licence has
+not been accepted. All 76 tests pass on both routes:
 
 ```bash
-rustup target add wasm32-wasip1
-./scripts/test-wasm.sh
+./scripts/test-native.sh                 # native, 76 tests
+./scripts/test-native.sh -p p1102-jbig   # anything cargo test takes
 ```
 
-That script passes an absolute runner path via `--config`, because cargo runs test
+`scripts/test-wasm.sh` runs the same suite on wasm32-wasip1, which links with Rust's own
+bundled rust-lld and needs no SDK. It is the fallback for a machine with no usable native
+toolchain, and it is what the CI-style checks used before the toolchain binaries were found.
+
+It passes an absolute runner path via `--config`, because cargo runs test
 binaries with the *package* directory as cwd, so a relative runner path in
 `.cargo/config.toml` does not resolve. Tests execute under `node`'s WASI implementation
 (`scripts/wasi-test-runner.mjs`), serially, since wasm has no threads.
@@ -129,11 +141,10 @@ with no indication of the assertion. With it, the panic message reaches the real
 This matters in practice: three test-authoring mistakes in this repo were found only
 because the assertion text became visible that way.
 
-This covers everything that matters most and is pure: the ZjStream byte layout, item
-ordering, `reserved` consistency, JBIG chunk padding rules, the PJL framing and its
-stripping, the CUPS raster page walk and header round trip, the full raster-to-job chunk
-sequence, and the filter's option parsing. It does not cover anything that needs a
-linker-produced binary, the filesystem, USB, or the printer.
+The suite covers the ZjStream byte layout, item ordering, `reserved` consistency, JBIG chunk
+padding rules, the PJL framing and its stripping, the CUPS raster page walk and header round
+trip, the full raster-to-job chunk sequence, and the filter's option parsing. Neither route
+covers what needs the printer, which is what the hardware sections below are for.
 
 ## Tools available right now
 

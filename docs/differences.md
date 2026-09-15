@@ -198,8 +198,14 @@ documents as the horizontal pixel alignment.
 ## 9. Deliberately unchanged
 
 - **The PPD's device description is byte-identical to HP's.** Media sizes, imageable areas,
-  resolutions, constraints and IPP reasons are the same file; only the driver wiring lines
-  differ, and the diff is exactly those lines. See docs/installation.md.
+  resolutions, constraints and IPP reasons are the same file. Only the driver wiring
+  differs, and "only" is now measured rather than asserted: generating the PPD and diffing
+  it against the installed one shows two added comment lines, the `*NickName` line and its
+  sixteen localised `*.Translation NickName/` keys gaining a " (native ARM64)" suffix, the
+  raster filter line repointed at our filter, and three lines removed - HP's
+  `application/vnd.cups-command` filter, `*cupsCommands`, and `*APPrinterUtilityPath`.
+  Nothing else, in 1297 lines. The command is in docs/installation.md, which carries the
+  same table.
 - **HP's queue, files and receipts are untouched**, so the change is reversible and both
   queues can coexist.
 - The 1284 device ID, the USB device path and the queue's device URI are inherited rather

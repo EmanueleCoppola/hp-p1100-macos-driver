@@ -87,12 +87,15 @@ CUPS and without a printer.
 ## Building and testing
 
     cargo check --workspace        # type-check only, no linker needed
-    rustup target add wasm32-wasip1
-    ./scripts/test-wasm.sh         # the full test suite, no linker needed
+    ./scripts/test-native.sh       # the full test suite on this machine
+    ./scripts/test-wasm.sh         # the same suite on wasm, for a machine with no linker
     ./scripts/build-native.sh      # the real native ARM64 binaries
 
-The test suite runs on wasm32-wasip1 because that target links with Rust's own bundled
-linker and needs no SDK at all, so tests work regardless of the machine's toolchain state.
+`scripts/test-native.sh` runs the 76 tests on aarch64-apple-darwin, which is the real target;
+it links with Apple's toolchain, or with Xcode's clang called directly when the licence has
+not been accepted. `scripts/test-wasm.sh` runs the identical suite on wasm32-wasip1, which
+links with Rust's own bundled linker and needs no SDK, so it works even with no native
+toolchain at all.
 
 For the native build, scripts/build-native.sh picks a route and says which one it used:
 
@@ -211,9 +214,11 @@ Verified by execution, on real captured data where it matters:
 - The job builder and the JBIG oracle: all eight deterministic test pages build, walk back
   with the expected chunk sequence, and round-trip their compressed image through the
   JBIG_BIH / JBIG_BID split unchanged.
-- The streaming filter: peak memory is flat in the job size (43 MB for a 299 MB raster,
-  against 312 MB when it buffered the whole job), with byte-identical output before and
-  after, and the reference decoder still reproducing every page.
+- The streaming filter: peak memory is flat in the job size. Measured now with
+  `/usr/bin/time -l`, peak RSS is 37.3 MB for a 31 MB one-page raster, 37.4 MB for 94 MB and
+  37.5 MB for 313 MB - a ten times larger job for 0.3% more memory - against 312 MB for the
+  last of those when the filter buffered the whole job. Output was byte-identical across the
+  change, and the reference decoder still reproduces every page.
 - **The JBIG compressor**, in both configurations it supports. Its output is byte-identical
   to the reference encoder of the standard across 42 comparisons (`scripts/jbig-sweep.py`:
   random noise, odd widths, single rows and columns, stripe boundaries, widths 1 to 1200),
