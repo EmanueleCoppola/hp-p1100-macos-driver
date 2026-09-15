@@ -77,6 +77,7 @@ middle stage is ours.
     crates/p1102-filter/     The CUPS filter binary: a thin wrapper around p1102-job.
     crates/p1102-cli/        Offline tooling: inspect rasters, dump streams, encode a job.
     scripts/                 inspection tools, test runner, PPD generator, installer.
+    assets/p1102.icns        the printer icon the queue shows, built by scripts/make-icns.py.
     docs/                    findings, written as they are confirmed.
     fixtures/inputs/         tiny deterministic source documents.
     LICENSE, LICENSE-MIT, LICENSE-APACHE   dual MIT / Apache-2.0
@@ -139,7 +140,7 @@ Remove it again, leaving HP's installation untouched:
     ./scripts/uninstall.sh --dry-run
     sudo ./scripts/uninstall.sh
 
-That installs the filter and a generated PPD into /Library/Printers/p1102 and creates a new
+That installs the filter, the printer icon and a generated PPD into /Library/Printers/p1102, and creates a new
 queue alongside HP's. HP's installation is read but never written, SIP is untouched, and no
 kernel or system extension is involved.
 
@@ -168,7 +169,7 @@ same licence gate.
     ./scripts/foo2zjs-oracle.sh fetch           # the reference driver, built here (test only)
     $PY scripts/reference-compare.py            # our whole job vs the reference driver's
     $PY scripts/zjs-compare.py a.zjs b.zjs      # semantic job comparison
-    ./scripts/verify-native.sh                  # ARM64 check for our binaries
+    ./scripts/verify-native.sh                  # ARM64 and dependency check for our binaries
     $PY scripts/rehearse-job.py                 # rehearse the CUPS -> filter boundary
     $PY scripts/preflight-usb.py                # what the USB bus and CUPS see, read-only
 

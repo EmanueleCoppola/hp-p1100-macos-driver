@@ -65,12 +65,54 @@ if [ "$MODE" = processes ]; then
 fi
 
 status=0
+depstatus=0
 checked=0
+
+# The dependency check needs a working Python; the architecture check does not. Apple's
+# /usr/bin/python3 is behind the licence gate, so look for one that runs and say so if there
+# is none rather than failing the script.
+PYTHON=${PYTHON:-}
+if [ -z "$PYTHON" ]; then
+    for candidate in /opt/homebrew/bin/python3.13 /opt/homebrew/bin/python3.10 python3; do
+        if "$candidate" -c 'pass' >/dev/null 2>&1; then PYTHON=$candidate; break; fi
+    done
+fi
+
+# What a binary links. The whole point of this replacement is that the answer is libSystem and
+# nothing else - no libcups, no frameworks, no rpath - so a stray dependency is a finding, not a
+# detail.
+# `judge` is 0 for the HP control, whose dependencies are its own business and must not change
+# this script's verdict.
+deps() {
+    judge=${2:-1}
+    if [ -z "$PYTHON" ]; then
+        echo "      links       not checked: no working Python for the Mach-O reader"
+        return 0
+    fi
+    dylibs=$("$PYTHON" "$REPO/scripts/macho.py" libs "$1" 2>/dev/null \
+        | sed -n 's/^ *load.*  \(\/.*\)$/\1/p')
+    if [ -z "$dylibs" ]; then
+        echo "      links       not a Mach-O file, or unreadable"
+        return 0
+    fi
+    printf '      links       %s\n' "$(echo "$dylibs" | tr '\n' ' ' | sed 's/ $//')"
+    for dylib in $dylibs; do
+        case "$dylib" in
+            /usr/lib/libSystem.B.dylib) ;;
+            *) if [ "$judge" = 1 ]; then
+                   echo "      UNEXPECTED  $dylib"; depstatus=1
+               else
+                   echo "      beyond libSystem: $dylib"
+               fi ;;
+        esac
+    done
+}
 
 check() {
     verdict=$(classify "$1")
     checked=$((checked + 1))
     printf '  %-22s %s\n' "$(basename "$1")" "$verdict"
+    deps "$1"
     case "$verdict" in
         INTEL*) status=1 ;;
     esac
@@ -103,14 +145,20 @@ if [ "$INCLUDE_HP" = 1 ]; then
     echo "HP's driver, as a control (expected Intel-only; does not affect the result):"
     HP=/Library/Printers/hp/laserjet/p1100_1560_1600series/hpRaster.bundle/Contents/MacOS
     for b in "$HP/rastertozjs" "$HP/usbink"; do
-        if [ -f "$b" ]; then printf '  %-22s %s\n' "$(basename "$b")" "$(classify "$b")"; fi
+        if [ -f "$b" ]; then
+            printf '  %-22s %s\n' "$(basename "$b")" "$(classify "$b")"
+            deps "$b" 0
+        fi
     done
 fi
 
 echo
-if [ "$status" = 0 ]; then
-    echo "OK: nothing Intel-only found."
-else
+if [ "$status" = 0 ] && [ "$depstatus" = 0 ]; then
+    echo "OK: nothing Intel-only, and nothing linked beyond libSystem."
+elif [ "$status" != 0 ]; then
     echo "FAIL: an Intel-only binary is in the print path." >&2
+else
+    echo "FAIL: something links more than libSystem (above)." >&2
 fi
-exit "$status"
+[ "$status" = 0 ] && [ "$depstatus" = 0 ] && exit 0
+exit 1
