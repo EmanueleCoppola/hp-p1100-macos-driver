@@ -128,6 +128,11 @@ are left alone.
     # CUPS writes filter stderr to the job log
     log show --predicate 'process == "cupsd"' --last 5m
 
+The filter's own messages are prefixed the way CUPS expects - `ERROR:`, `INFO:`, `WARNING:` -
+so a failure does not only reach the log: CUPS uses that first word to set the queue's state
+message, which `lpstat -p` then shows. A job that stops for no visible reason therefore has
+its reason in the queue's own state, not just in a log nobody opened.
+
 ## Undoing a bad install by hand
 
 If a script fails halfway, this fully reverses it:

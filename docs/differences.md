@@ -151,6 +151,15 @@ whether the request over USB produces a level at all.
 **This is the one functional regression relative to the working driver, and it does not
 affect printing.**
 
+A second, smaller gap sits next to it, in the *print* path rather than the command path: HP's
+filter reports printer state reasons - `STATE: media-empty`, `media-needed`, `media-jam` and the
+rest of the strings listed under "Status / error vocabulary" - which it can only do by reading
+the backchannel while it works. We do not read the backchannel, so we report no state reasons
+of our own. Whether the queue loses anything by that is **UNKNOWN** and worth one observation:
+does the queue show a reason (an empty tray, a jam) when the printer is in that state? If it
+does, Apple's usb backend is reporting them and this gap costs nothing; if it does not, adding
+a backchannel read to the filter is the work.
+
 ## 5. Duplex items are emitted; both known drivers also have host-side page handling. UNKNOWN
 
 The PPD offers Duplex None / DuplexNoTumble / DuplexTumble, and CUPS describes this printer

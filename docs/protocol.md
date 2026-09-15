@@ -539,6 +539,21 @@ Geometry, page size and media type come from neither: the raster page header car
 already reflects the PPD's defaults for those, which is where the interface says a raster
 filter should read them.
 
+## How the filter reports itself
+
+A filter talks to CUPS through its exit status and its standard error, and CUPS classifies
+those lines by their **first word** - `ERROR:` sets the printer's state message and logs at
+error level, `WARNING:`, `INFO:`, `DEBUG:`, `STATE:` and `ATTR:` do their own things - so a line
+that begins with the program's name instead is merely stored as text. This filter now follows
+that: `ERROR:` for a job it could not encode, `INFO:` for the summary of one it did, and
+`WARNING:` when it cannot read the PPD and falls back to its built-in defaults.
+
+HP's filter follows the same convention - its binary contains `INFO:`, `DEBUG:`, `ERROR:` and
+`STATE:` - and it goes one step further than we do, reporting printer state *reasons* from the
+print path, which is what its `media-empty`, `media-needed` and `media-jam` strings are for.
+**UNKNOWN** whether that requires the backchannel reading it also does, or whether Apple's usb
+backend reports those reasons anyway; `docs/differences.md` item 4 covers it.
+
 ## USB
 
 **CONFIRMED** the PPD's `1284DeviceID` is
