@@ -434,37 +434,30 @@ cell chosen by grey level - while ours carry one, thresholded at 128. The protoc
 antialiased text and photographs get a hard edge from us where HP would print a dot pattern, and
 the printer would have four levels to work with instead of two.
 
-What matching it would take, and why it is not done yet. The item side is small but not free:
-`PageGeometry` in `crates/p1102-protocol` carries a `bits_per_pixel` that `ZJI_VIDEO_BPP` and
-`ZJI_VIDEO_X` are computed from, but `mono()` hard-codes it to 1 and nothing plumbs a depth
-through. The image becomes **two bit planes** instead of one, so the encoder has to emit two.
-And the chunk and plane shape HP uses for that has not been read out of its binary: its page
-items come from `zcups::Formatter::startPage`, which takes the depth as its third argument and
-reads a `bitsPerPixel` property, and whether plane records are written at all is behind three
-`zjs::BandWriter` flags - `sendPlaneItem`, `sendStartPlaneChunk` and `sendEndPlaneChunk` -
-which are what a two-bit implementation has to settle. The tone tables are HP's own data, so a
-legitimate implementation would read them out of the user's installed driver, which is what
-`scripts/hp-tone-table.py` does. And none of it can be validated without the printer: a wrong
-two-bit framing would stop the queue printing, where a wrong tone curve only looks wrong. That is
-why the threshold stays until there is a device to try it on.
+What matching it would take, and where it stands. The encoder is done: `p1102-jbig` writes
+`planes(n)`, and its two-plane output is byte-identical to the reference encoder's for six pages
+in `scripts/jbig-sweep.py`, with goldens for a one-stripe and a two-stripe page in the crate's
+own tests.
 
-Two of the three pieces are verifiable here, which is worth knowing before anyone starts. The
-conversion is checkable against the tables themselves (the decoder above reproduces them, and
-the structure is asserted by `scripts/hp-tone-table.py`), and the compression is checkable
-against the reference encoder, which emits a multi-bitplane BIE when it is given a PGM rather
-than a PBM - so a two-plane encoder can be compared byte for byte the way the one-plane encoder
-is in `scripts/jbig-sweep.py`. Only the third piece, the ZJS framing for two planes, needs the
-printer's own answer.
+The conversion is the part that is described but not written: the table indexed by the grey
+value, four columns per byte, the row from the band's remaining line count, as above. It is
+checkable against the tables themselves, which `scripts/hp-tone-table.py` decodes and asserts.
 
-Two notes that belong with this entry. The depth question is the same one seen from the input
-side: our filter accepts 1 bit per pixel (copied through) and 8 (thresholded) and refuses
-anything else with a one-line error naming the depth, before writing a byte of the job - a
-4900-pixel-wide page relabelled as 2, 4 or 16 bits per pixel exits 1 with `ERROR: encoding job:
-unsupported raster depth: N bits per pixel`. And the reference comparison does not cover any of
-this: the page both sides see there is bilevel (see "How this list is measured now"), the
-reference *driver* only ever reads a 1-bit `pbmraw` page, and in its chain the grey decision
-belongs to Ghostscript (`-sDEVICE=pbmraw` in its wrapper), which is not installed on this
-machine - so a grey page cannot be put through the reference chain here either.
+The item side is small but not free: `PageGeometry` in `crates/p1102-protocol` carries a
+`bits_per_pixel` that `ZJI_VIDEO_BPP` and `ZJI_VIDEO_X` are computed from, but `mono()`
+hard-codes it to 1 and nothing plumbs a depth through.
+
+The framing is what needs the printer. HP's page items come from `zcups::Formatter::startPage`,
+which takes the depth as its third argument and reads a `bitsPerPixel` property, and whether
+plane records are written at all is behind three `zjs::BandWriter` flags - `sendPlaneItem`,
+`sendStartPlaneChunk` and `sendEndPlaneChunk` - which are what a two-bit implementation has to
+settle. The tone tables are HP's own data, so a legitimate implementation reads them out of the
+user's installed driver: `scripts/hp-tone-table.py --out DIR` writes them. And a wrong two-bit
+framing would stop the queue printing, where a wrong tone curve only looks wrong, which is why
+the threshold stays until there is a device to try it on.
+
+So the compression is verified here already, the conversion is checkable against the tables
+themselves, and only the framing waits for the printer's own answer.
 
 One observation settles whether the two-bit difference matters in practice: print a graded fill
 or antialiased text and compare it with the same page through HP's queue while that still runs.

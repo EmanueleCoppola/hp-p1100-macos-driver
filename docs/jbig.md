@@ -46,11 +46,17 @@ easy to get wrong and produces a stream no decoder accepts.
 `JBG_DELAY_AT` (0x100) and `JBG_SDRST` (0x200) are library-level switches, not BIH fields,
 which is why the options byte is masked with 0x7f before being written.
 
-`planes` is 1 in the BIH this repository writes, and 1 is what the reference driver sends. HP's
+`planes` is 1 in the BIH the default path sends, and 1 is what the reference driver sends. HP's
 own driver writes **2** for this printer, because the `cupsCompression` markers in its PPD put it
-on the two-bit path; item 11 of `docs/differences.md` has that reading, the 256-entry tone
-tables behind it, and what a two-bit implementation would need. The encoder here is
-single-plane by design.
+on the two-bit path; item 11 of `docs/differences.md` has that reading and the 256-entry tone
+tables behind it.
+
+The encoder here writes either. `JbigEncoder::planes(n)` - and the prototype's `--planes n` -
+emits `n` planes, each one bit of the pixel value with the most significant plane first,
+stripe-major and plane-minor, with a probability state table per plane carried across that
+plane's stripes. That is what the reference encoder writes for a PGM when it is told to use
+binary words rather than Gray-coded ones, and `scripts/jbig-sweep.py` checks six two-plane
+pages against it byte for byte, including a stripe boundary.
 
 ## Body layout
 

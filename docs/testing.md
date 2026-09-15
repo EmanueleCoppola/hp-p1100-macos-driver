@@ -246,9 +246,10 @@ are visible in that binary - which is what makes it the right reference.
 
 `encode` passes the parameters we target, `-d 0 -p 92 -m 0 -s 128 -o 3`, and appends any
 extra arguments, so `encode in.pbm out.jbg -p 0` also produces the no-options
-configuration. `scripts/jbig-sweep.py` runs 21 bitmaps through both implementations in
-both configurations - 42 comparisons - and requires byte identity; it is the check behind
-the claim in `docs/jbig.md`.
+configuration, and `encode in.pbm out.jbg -b -p 28` the two-plane one. `scripts/jbig-sweep.py`
+runs 21 bitmaps through both implementations in both of those configurations, plus six
+two-plane pages against the reference encoder's multi-plane configuration - 48 comparisons in
+all - and requires byte identity; it is the check behind the claim in `docs/jbig.md`.
 
 ### The reference driver, as a runnable golden master
 

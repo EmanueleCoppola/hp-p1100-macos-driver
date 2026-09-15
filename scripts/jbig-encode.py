@@ -219,21 +219,24 @@ class QmEncoder(object):
 # --------------------------------------------------------------------------- JBIG
 
 class JbigEncoder(object):
-    def __init__(self, width, height, l0=128, order=3, options=DEFAULT_OPTIONS):
+    def __init__(self, width, height, l0=128, order=3, options=DEFAULT_OPTIONS, planes=1):
         self.xd = width
         self.yd = height
         self.l0 = l0
         self.order = order
         self.options = options
+        self.planes = planes
         self.hbpl = (width + 7) // 8          # bytes per line, padding included
         self.stripes = (height + l0 - 1) // l0 if height else 0
-        self.st = bytearray(4096)
+        # One probability state table per bit plane: T.82 codes each plane with its own
+        # coder state, carried across that plane's stripes.
+        self.st = [bytearray(4096) for _ in range(planes)]
 
     def bih(self):
         b = bytearray(20)
         b[0] = 0                    # DL
         b[1] = 0                    # D, highest layer
-        b[2] = 1                    # one bit plane
+        b[2] = self.planes          # number of bit planes
         b[3] = 0
         b[4:8] = self.xd.to_bytes(4, 'big')
         b[8:12] = self.yd.to_bytes(4, 'big')
@@ -244,22 +247,28 @@ class JbigEncoder(object):
         b[19] = self.options & 0x7F
         return bytes(b)
 
-    def encode(self, bitmap):
-        if len(bitmap) < self.hbpl * self.yd:
-            raise ValueError('bitmap too small: %d bytes, need %d'
-                             % (len(bitmap), self.hbpl * self.yd))
+    def encode(self, bitmaps):
+        if len(bitmaps) != self.planes:
+            raise ValueError('%d bitmap(s) for a %d-plane image' % (len(bitmaps), self.planes))
+        for bitmap in bitmaps:
+            if len(bitmap) < self.hbpl * self.yd:
+                raise ValueError('bitmap too small: %d bytes, need %d'
+                                 % (len(bitmap), self.hbpl * self.yd))
         out = bytearray(self.bih())
+        # Stripes outermost, planes innermost: that is the order the reference encoder
+        # writes, and each stripe of each plane is terminated by its own marker.
         for stripe in range(self.stripes):
-            out += self._encode_sde(bitmap, stripe)
+            for plane in range(self.planes):
+                out += self._encode_sde(bitmaps[plane], stripe, plane)
         return bytes(out)
 
-    def _encode_sde(self, bitmap, stripe):
+    def _encode_sde(self, bitmap, stripe, plane):
         hbpl, xd, yd = self.hbpl, self.xd, self.yd
         hl = self.l0
         y0 = stripe * hl
         reset = (stripe == 0)
 
-        enc = QmEncoder(self.st, reuse_state=not reset)
+        enc = QmEncoder(self.st[plane], reuse_state=not reset)
         lines = min(hl, yd - y0)
 
         # Typical prediction: one bit per line saying whether the line is still typical
@@ -378,6 +387,54 @@ def read_pbm(path):
     return w, h, d[i:]
 
 
+def read_pgm(path, planes):
+    """A P5 grey file whose samples have exactly `planes` bits."""
+    with open(path, 'rb') as f:
+        d = f.read()
+    if not d.startswith(b'P5'):
+        raise SystemExit('not a P5 grey file: %s' % path)
+    i = 2
+    vals = []
+    while len(vals) < 3:
+        while d[i:i + 1].isspace():
+            i += 1
+        if d[i:i + 1] == b'#':
+            while d[i:i + 1] not in (b'\n', b''):
+                i += 1
+            continue
+        j = i
+        while not d[j:j + 1].isspace():
+            j += 1
+        vals.append(int(d[i:j]))
+        i = j
+    i += 1
+    w, h, maxval = vals
+    if maxval + 1 != 1 << planes:
+        raise SystemExit('%s has maxval %d, which is not %d bits per pixel'
+                         % (path, maxval, planes))
+    if len(d) - i < w * h:
+        raise SystemExit('%s holds %d samples, need %d' % (path, len(d) - i, w * h))
+    return w, h, d[i:i + w * h]
+
+
+def split_planes(width, height, samples, planes, msb_first):
+    """Each sample's bits into one packed bitmap per plane, most significant bit first.
+
+    The reference encoder reads a PGM and splits it the same way - planes are the bits of
+    the sample, not Gray-coded, when it is told to use binary words.
+    """
+    stride = (width + 7) // 8
+    out = [bytearray(stride * height) for _ in range(planes)]
+    for y in range(height):
+        row = samples[y * width:(y + 1) * width]
+        for x, v in enumerate(row):
+            for p in range(planes):
+                bit = (v >> (planes - 1 - p)) & 1 if msb_first else (v >> p) & 1
+                if bit:
+                    out[p][y * stride + (x >> 3)] |= 0x80 >> (x & 7)
+    return [bytes(b) for b in out]
+
+
 def main(argv):
     ap = argparse.ArgumentParser(add_help=True)
     ap.add_argument('input')
@@ -385,17 +442,26 @@ def main(argv):
     ap.add_argument('--l0', type=int, default=128)
     ap.add_argument('--options', type=lambda s: int(s, 0), default=DEFAULT_OPTIONS,
                     help='BIH options byte (default 0x5c, the reference configuration)')
+    ap.add_argument('--planes', type=int, default=1,
+                    help='bit planes to encode: 1 takes a PBM, more take a PGM')
+    ap.add_argument('--plane-order', choices=('msb', 'lsb'), default='msb',
+                    help='which bit of a PGM sample goes to the first plane')
     ap.add_argument('--quiet', action='store_true')
     args = ap.parse_args(argv)
 
-    w, h, data = read_pbm(args.input)
-    enc = JbigEncoder(w, h, l0=args.l0, options=args.options)
-    bie = enc.encode(data)
+    if args.planes == 1:
+        w, h, data = read_pbm(args.input)
+        bitmaps = [data]
+    else:
+        w, h, data = read_pgm(args.input, args.planes)
+        bitmaps = split_planes(w, h, data, args.planes, args.plane_order == 'msb')
+    enc = JbigEncoder(w, h, l0=args.l0, options=args.options, planes=args.planes)
+    bie = enc.encode(bitmaps)
     with open(args.output, 'wb') as f:
         f.write(bie)
     if not args.quiet:
-        print('%s: %dx%d -> %d bytes (%d stripes, L0=%d, options=0x%02x)'
-              % (args.output, w, h, len(bie), enc.stripes, args.l0, args.options))
+        print('%s: %dx%d, %d plane(s) -> %d bytes (%d stripes, L0=%d, options=0x%02x)'
+              % (args.output, w, h, args.planes, len(bie), enc.stripes, args.l0, args.options))
     return 0
 
 
