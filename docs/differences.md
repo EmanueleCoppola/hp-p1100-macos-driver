@@ -439,6 +439,19 @@ One observation settles whether it matters: print a graded fill or antialiased t
 it with the same page through HP's queue while that still runs. If ours looks worse in a way
 someone would notice, the work is to find HP's screen rather than to invent one.
 
+The depth this entry turns on is worth stating too, because HP handles one more case than we
+do. Its filter has a two-bit path as well - `ProcessMonoTwoBit` and `_ScreenPixelsTwoBit`, with
+`selectScreenTable` taking the bits per pixel as an argument - while ours accepts 1 bit per
+pixel (copied through, bit for bit) and 8 (thresholded), and refuses anything else with a
+one-line error naming the depth it was given, before writing a single byte of the job. That is
+measured rather than assumed: a 4900-pixel-wide page relabelled as 2, 4 or 16 bits per pixel
+exits 1 with `ERROR: encoding job: unsupported raster depth: N bits per pixel`, and a
+2-bits-per-colour raster with 4 bits per pixel is refused the same way. Nothing in this bundle
+asks for those depths - the PPD's only resolution choices set `cupsBitsPerColor 8` and
+`cupsColorSpace 0` - so the difference is a limit on hand-built or re-hosted jobs rather than
+a live one, and a refusal is the right answer there: a wrong-depth raster is not something to
+guess at.
+
 ## What settles the unverified items
 
 Each one maps to an observation the hardware test makes:
