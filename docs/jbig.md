@@ -64,32 +64,54 @@ groups each ending `ff 02`.
 
 ## Parameters for this printer family
 
-The open implementation that is verified against the P1102 passes these to the reference
-library for this model:
+Two independent sources agree on this configuration, and it is what we emit:
+
+- The open implementation that supports the P1102 passes these to the reference library
+  for this model (`JbgOptions` in `foo2zjs.c`).
+- HP's own filter has the same byte compiled into it. `jbig::ZjbigEncoder`'s constructor in
+  `rastertozjs` writes `0x5c` to the field `getBIH` copies into BIH byte 19, and `0x03` to
+  byte 18, which is readable in the disassembly as `movb $0x5c, 0x93(%rbx)`.
 
     order   = ILEAVE | SMID              = 3
-    options = DELAY_AT | LRLTWO | TPDON | TPBON | DPON   -> BIH byte (options & 0x7f) = 0x5c
+    options = DPON | TPBON | TPDON | LRLTWO   -> BIH byte (options & 0x7f) = 0x5c
     L0      = 128
     MX      = 0        (no adaptive template movement on this path)
     MY      = 0
 
+Options 0x5c is where HP's byte and the reference disagree with the prose: the reference
+also sets `JBG_DELAY_AT`, but that is a library switch that never reaches the header, which
+is why the options byte is masked with 0x7f.
+
 `MX = 0` is the significant simplification: the adaptive template pixel never moves, so
-none of the ATMOVE machinery is needed.
+none of the ATMOVE machinery is needed. HP's constructor seeds that field with 16 and lets
+the pipeline override it from `atmove` / `minAtMove` / `maxAtMove` properties, so HP's own
+stream may use a moving template; the reference driver explicitly forces `MX = 0` for this
+model family and is the configuration we match. See `docs/differences.md` item 2.
 
-## What we emit
+## What each option bit does here
 
-The simplest configuration that is still conforming and decodable:
+Only two of the four bits change the coded data of a single-layer, single-plane image, and
+both are implemented:
 
-    DL = 0, D = 0, planes = 1
-    order   = 3
-    options = 0        (no typical prediction, no differential layers, no LRLTWO)
-    L0      = 128
-    MX = MY = 0
+- **TPBON** (typical prediction): one bit per line, coded with a context the standard
+  reserves for it, saying whether the line's typicality *changed*. A line that is identical
+  to the one above is then not coded at all. This is the mechanism that makes long runs of
+  identical lines cost one bit each, and the one worth getting right.
+- **LRLTWO**: the layer we code is the lowest resolution layer - with no differential
+  layers it is also the only one - so this bit does two things here: it selects the
+  *two-line* template (the current and the previous line) rather than the standard
+  three-line one, and it selects which of the two reserved typical-prediction contexts the
+  TPBON bit is coded with. Getting only the context half of that wrong produces a stream
+  that is still valid but no longer byte-identical to the reference, which is how this was
+  caught.
 
-A conforming decoder must handle every option combination, so `options = 0` is legal, and
-it drops the two most intricate parts of the algorithm (typical prediction and the LRL
-two-line template). If the printer turns out to dislike it, typical prediction can be
-added later; the framing and the coder do not change.
+**TPDON** and **DPON** do not change this path at all: TPDON belongs to the
+low-resolution image of differential layers, which we do not emit, and DPON is a
+decoder-side switch. They are written into the BIH because both sources write them.
+
+`options = 0` remains supported (`JbigEncoder::with_options`) and is still checked against
+the reference, because it takes the other template and skips typical prediction entirely -
+which makes it a useful second path to keep honest.
 
 ## Verification available now
 
@@ -99,22 +121,27 @@ compiler, by unpacking the Homebrew bottle for `jbigkit` 2.1. It provides both d
     pbmtojbg    reference encoder   (bitmap -> BIE)
     jbgtopbm    reference decoder   (BIE -> bitmap)
 
-Use `scripts/jbig-oracle.sh` to fetch it, and `scripts/jbig-oracle.sh compare` to check our
-output. Two checks matter, and the byte-exact one is the strong one:
+Use `scripts/jbig-oracle.sh` to fetch it. Two checks matter, and the byte-exact one is the
+strong one:
 
-1. **Byte-exact**: our BIE for a given bitmap must equal `pbmtojbg -p 0 -m 0 -s 128` output
-   for the same bitmap. This is what actually proves the arithmetic coder and the context
-   model are right.
+1. **Byte-exact**: our BIE for a given bitmap must equal `pbmtojbg -p 92 -m 0 -s 128 -o 3`
+   output for the same bitmap (`-p 92` is 0x5c). This is what actually proves the
+   arithmetic coder, the template and the typical-prediction state machine are right.
 2. **Round trip**: `jbgtopbm` on our output must reproduce the original pixels.
 
 ### Result
 
-`scripts/jbig-encode.py` - a from-the-standard implementation of the same algorithm the
-Rust encoder will use - is **byte-identical to the reference encoder** across a sweep of 22
-cases: blank, all-black, uniform random noise, sparse patterns, banded patterns, odd widths
-(13, 1000), a single row, a single column, an exact stripe boundary (129 lines), and widths
-from 1 to 1200, at both L0 = 128 and L0 = 64. Random noise is the hardest case for an
-arithmetic coder, so the QM coder and the context model are both exercised properly.
+`scripts/jbig-sweep.py` runs 21 deterministic bitmaps through both implementations in both
+configurations - 42 comparisons - and requires byte identity. It reports all 42 identical.
+The set covers blank and solid images, uniform noise (the hardest case for an arithmetic
+coder), a single row, a single column, odd widths (7, 9, 63, 65, 127, 255, 1000), exact
+stripe boundaries, and widths either side of the 128-pixel alignment.
+
+The sweep drives `scripts/jbig-encode.py`, a from-the-standard implementation of the same
+algorithm in Python, so it does not depend on being able to build the Rust code. The Rust
+encoder is pinned to the reference separately, by the golden vectors below and by
+`scripts/reference-compare.py`, which requires the *whole job* our filter writes - including
+this compressed image - to be byte-identical to the reference driver's for the same page.
 
 One trap worth recording: `pbmtojbg` silently enables differential layers for images larger
 than its default lowest-layer size of 640x480, which changes the BIH and produces a stream
@@ -124,11 +151,11 @@ our single-layer encoder must not be compared against. Always pass **-d 0** when
 ## The implementation
 
 `crates/p1102-jbig` is a port of that verified prototype into pure Rust, with no
-dependencies. Its output is byte-identical to the reference for the same configuration.
-Four vectors from the reference encoder are embedded as golden tests and run on every
-build: 8x2, 16x4, an 800x600 image spanning five stripes, and a degenerate 1x200 single
-column. `scripts/jbig-encode.py` remains as the prototype and as an independent
-cross-check of the Rust code.
+dependencies. Four vectors from the reference encoder are embedded as golden tests and run
+on every build: 8x2, 16x4, an 800x600 image spanning five stripes, and a degenerate 1x200
+single column. The two small ones are checked in **both** configurations, so the template
+switch and the typical-prediction path each have a golden. `scripts/jbig-encode.py` remains
+as the prototype and as an independent cross-check of the Rust code.
 
 `p1102-job` feeds it the same bitmap the uncompressed path would use, and the JBIG line
 length is asserted to equal the raster row stride - a mismatch there would silently shear

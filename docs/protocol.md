@@ -196,11 +196,44 @@ The reference implementation drives the P1102 as model `2` with flags `-P -z2 -L
 - `ZJT_JBIG_BID` carries JBIG strip / data blocks from the encoder.
 - `ZJT_END_JBIG` terminates the image. On the P1102 path it carries no items, unless
   duplex is active, in which case it carries one `ZJI_DMDUPLEX` item.
-- The final `ZJT_JBIG_BID` payload is zero-padded so the chunk ends on a 4-byte boundary;
-  earlier BID chunks are not padded.
+- The final `ZJT_JBIG_BID` payload carries the reference implementation's padding: 16 zero
+  bytes on top of rounding the chunk up to a 4-byte boundary, so a 120-byte image arrives as
+  a 136-byte payload. Earlier BID chunks are not padded at all. **CONFIRMED** by reading the
+  code and by measuring its output; the padding is inert (a decoder stops once it has the
+  announced number of lines) but we emit it so a captured job stays comparable byte for
+  byte.
 
 Our encoder and the parameters it emits are documented in `docs/jbig.md`. It is verified
 byte-for-byte against the reference implementation of the standard.
+
+### HP's encoder, read out of its binary
+
+This became readable once Xcode's toolchain could run (`docs/testing.md`): `rastertozjs`
+keeps its symbols, so `nm` and `otool -tvV` name what they are. **CONFIRMED**:
+
+- `jbig::AbstractEncoder` has `setTemplate(int)`, `setOrderBits(int)`, `setStripeSize(int)`,
+  `setTypicalLinePrediction(bool)`, `setEndOfStripeReset(bool)`, `setAtMove(int,int,int)`,
+  `setLineStride(int)`, `setBitsPerPixel(int)` and `getBIH(jbig::BIH*)`. That is the same
+  parameter set T.82 defines, so HP is not doing anything exotic.
+- `jbig::ZjbigEncoder`'s constructor writes the BIH defaults directly:
+  `movb $0x5c, 0x93(%rbx)`, `movb $0x3, 0x92(%rbx)`, `movb $0x10, 0x90(%rbx)`. Offsets 0x90
+  to 0x93 are the four bytes `getBIH` writes into BIH bytes 16..19 in order, so HP's
+  defaults are `MX = 16`, `MY = 0`, `order = 3`, `options = 0x5c`.
+- `zjs::JbigBandWriter::start` then reads the properties `atmove`, `minAtMove` and
+  `maxAtMove` off its `zeno::TagArg`, which is where the adaptive template from the
+  constructor can be overridden. That is also the source of the property names this
+  document already listed as LIKELY.
+
+The one thing this does not settle is whether the running driver leaves `MX` at 16 or
+overrides it to 0; `docs/differences.md` item 2 records what we emit and why.
+
+## Record format, cross-checked against the reference driver
+
+**CONFIRMED** every chunk type, item tag, item order and `reserved` value this document
+describes is reproduced byte for byte by `foo2zjs`, which supports this printer, for the
+same page and options - see `scripts/reference-compare.py`. That comparison is what turned
+these tables from inference into measured agreement; it is also what caught the padding
+rule above, which an earlier version of this document described as 4-byte alignment only.
 
 ## Uncompressed mode
 
@@ -240,6 +273,21 @@ class/subclass/protocol, and does synchronous bulk reads and writes (`mBulkOutPi
 `*cupsModelNumber: 256`. One bundle serves the whole P1100/P1560/P1600 family, so the
 model is selected by PPD / `1284DeviceID`, not by a different binary.
 
+**CONFIRMED** the same family is driven by the open reference implementation as model 2
+with `-P -z2 -L0`. That string is not folklore: it is the `prototype` line of the
+`foo2zjs-z2` driver in the OpenPrinting database, whose printer record for
+`HP-LaserJet_Pro_P1102` also carries the device's own IEEE 1284 identity, captured from a
+real unit:
+
+```text
+MFG:Hewlett-Packard;MDL:HP LaserJet Professional P1102;
+CMD:ZJS,PJL,ACL,HTTP;CLS:PRINTER;DES:HP LaserJet Professional P1102;FWVER:20090924;
+```
+
+`CMD:ZJS,PJL` is independent confirmation of the headline finding from the device side,
+and `ACL` is the firmware-upload command set, which is worth remembering when reading the
+firmware question below.
+
 ## Firmware
 
 **LIKELY not applicable to the P1102.** Its bundle contains no firmware blob. The
@@ -249,6 +297,11 @@ each an ELF with an ASCII date prefix - `HP1005.acl` is `20080505` then `\x7fELF
 the P1005/P1006/P1505/1020 family. **UNKNOWN** without hardware: whether the P1102 ever
 needs a host-side firmware download after a power cycle. First thing to observe once the
 printer is attached.
+
+One caveat against that "no": the device advertises `CMD:...ACL...` in its own IEEE 1284
+identity (above), so it can accept the firmware-upload command set even though this
+machine's driver never uploads anything to it. The reference implementation does not upload
+firmware to this model either, which is why nothing in this stack does.
 
 ## CUPS raster, the input side
 

@@ -8,8 +8,8 @@ macOS 27.0 (build 26A428), Darwin 27.0.0, Apple M2 Max, arm64
 
 ## Toolchain blockers found (CONFIRMED)
 
-1. **Xcode licence not accepted.** `/usr/bin/{clang,cc,otool,lipo,nm,strings,python3,make}`
-   are shims that refuse to run:
+1. **Xcode licence not accepted - at the shims, not at the tools.**
+   `/usr/bin/{clang,cc,otool,lipo,nm,strings,python3,make}` are shims that refuse to run:
 
    ```text
    You have not agreed to the Xcode license agreements.
@@ -18,12 +18,30 @@ macOS 27.0 (build 26A428), Darwin 27.0.0, Apple M2 Max, arm64
 
    Full Xcode 26.3 is installed at `/Applications/Xcode.app` and
    `/Library/Preferences/com.apple.dt.Xcode.plist` records agreement to `26.3`, but
-   macOS 27 ships a newer licence text, so re-acceptance is required. This needs an
-   admin password and therefore the user; it blocks compiling Rust and blocks Apple's
-   Mach-O tools.
+   macOS 27 ships a newer licence text, so re-acceptance is required. Re-accepting needs
+   an admin password and therefore the user.
 
-   Workaround in place: `scripts/macho.py` and `scripts/elfinfo.py` are pure-Python and
-   run under Homebrew Python, which is independent of Apple's tools.
+   **The gate is in the shim, not in the toolchain.** The real binaries behind it run
+   fine when called directly with an explicit SDK:
+
+   ```bash
+   XC=/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin
+   SDK=/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk
+   $XC/clang --version                 # Apple clang 21.0.0
+   $XC/nm  rastertozjs | head          # symbols, including HP's C++ class names
+   $XC/otool -tvV -p <symbol> <file>   # disassembly
+   echo 'int main(void){return 0;}' > t.c && $XC/clang -isysroot $SDK t.c -o t && ./t
+   ```
+
+   `/Applications/Xcode.app/Contents/Developer/usr/bin/make` is the same story. This is
+   how the reference driver was built, how HP's filter was disassembled, and how
+   `scripts/foo2zjs-oracle.sh` and `scripts/build-native.sh` decide what to use. It is a
+   toolchain path, not a licence circumvention: nothing is accepted, installed or
+   modified, and accepting the licence remains the supported route. If it were revoked,
+   the fallbacks below still work.
+
+   `scripts/macho.py` and `scripts/elfinfo.py` remain as the pure-Python readers that need
+   no Apple tooling at all.
 
 2. **No Rosetta 2.** `arch -x86_64 /usr/bin/true` -> `Bad CPU type in executable`.
    Only `RosettaLinux` is present. No x86_64 dyld shared cache exists.
@@ -121,11 +139,12 @@ linker-produced binary, the filesystem, USB, or the printer.
 
 | tool | status |
 |---|---|
-| `rustc` / `cargo` 1.98.0 | present, but linking currently fails behind the Xcode licence gate |
+| `rustc` / `cargo` 1.98.0 | present; links with Xcode's toolchain directly, or with `rust-lld` and the stub SDK |
 | `/opt/homebrew/bin/python3.13`, `python3.10` | present and working |
 | `file`, `xxd`, `hexdump`, `codesign`, `plutil`, `gzcat`, `cupsfilter`, `lpstat` | present and working |
 | our `scripts/macho.py`, `scripts/elfinfo.py`, `scripts/cupsraster.py` | working |
-| `otool`, `nm`, `lipo`, `strings`, `clang`, `/usr/bin/python3` | blocked by Xcode licence |
+| Xcode's own `clang`, `nm`, `otool`, `lipo`, `strings`, `make` | working when called directly with an SDK; see above |
+| `/usr/bin/{clang,cc,otool,nm,lipo,strings,make,python3}` | blocked: these are the gated shims |
 
 ## Generating fixtures
 
@@ -169,6 +188,56 @@ known-good payloads above, and checking our own encoder byte for byte once it ex
 Pinned bottle: `sha256 a7cc930c8a3652ca...`, arm64_tahoe, jbigkit 2.1. It is GPL and is
 used only as an oracle: never committed, never linked, never shipped. `jbigkit` is exactly
 the library HP itself bundled, which is what makes it the right reference.
+
+`encode` passes the parameters we target, `-d 0 -p 92 -m 0 -s 128 -o 3`, and appends any
+extra arguments, so `encode in.pbm out.jbg -p 0` also produces the no-options
+configuration. `scripts/jbig-sweep.py` runs 21 bitmaps through both implementations in
+both configurations - 42 comparisons - and requires byte identity; it is the check behind
+the claim in `docs/jbig.md`.
+
+### The reference driver, as a runnable golden master
+
+HP's filter cannot run here, but `foo2zjs` - the open driver that supports this printer -
+can, and a job it produces is the closest available statement of what a working driver
+sends. `scripts/foo2zjs-oracle.sh` fetches and builds it out of a cache directory using
+Xcode's toolchain directly (see the toolchain note above).
+
+```bash
+./scripts/foo2zjs-oracle.sh fetch        # idempotent; GPL, test-only, never committed
+./scripts/foo2zjs-oracle.sh which        # where the binary landed
+./scripts/foo2zjs-oracle.sh -h           # it takes the usual foo2zjs options
+
+PY=/opt/homebrew/bin/python3.13
+$PY scripts/reference-compare.py                      # every case
+$PY scripts/reference-compare.py --only a4 --keep /tmp/reference
+```
+
+Each case goes through the whole real path on both sides: the raster comes from Apple's
+own `cgpdftoraster` via `cupsfilter` with the PPD's real options, our side is the actual
+filter binary with the argv shape cupsd uses, and the reference is fed the same page
+bitmaps with the equivalent flags. The pass condition is **byte identity after removing
+the job-attribute line**, which carries the clock; a failure prints the differing items by
+name, because `scripts/zjs-compare.py` is what is doing the explaining.
+
+Two things are deliberately *not* in the case list, and both are recorded in
+`docs/differences.md`: duplex (the reference reorders and rotates pages host-side, we leave
+that to the printer) and the media code (it reaches us in the raster header, which is set
+through the PostScript page device - something `cupsfilter` cannot reproduce).
+
+### Reading HP's filter
+
+The same toolchain path makes HP's own binaries skimmable without running them:
+
+```bash
+XC=/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin
+F=/Library/Printers/hp/laserjet/p1100_1560_1600series/hpRaster.bundle/Contents/MacOS/rastertozjs
+$XC/nm "$F" | $XC/c++filt | grep 'jbig::'          # its own encoder's surface
+$XC/otool -tvV -p __ZN4jbig12ZjbigEncoderC1EiiRN4zeno7IWriterE "$F"
+```
+
+That is how the BIH defaults `0x5c` / order `3` / `MX 16` in `docs/protocol.md` were read
+off, and how the PJL literal list in `docs/differences.md` was checked. `c++filt` is a
+harness from the same toolchain directory: `/usr/bin/c++filt` is gated too.
 
 ## Hardware bring-up with no build at all
 

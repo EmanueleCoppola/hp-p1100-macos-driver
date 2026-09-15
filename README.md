@@ -5,9 +5,12 @@ A native Apple Silicon replacement for the Intel-only HP driver that drives the
 
 Status: the existing stack is documented, the printer protocol is understood and
 specified, and a dependency-free Rust stack exists with the raster-to-job pipeline, a JBIG
-compressor and a CUPS filter wired end to end. All of it is tested, and the compressor is
-byte-identical to the reference implementation. **Nothing has been validated on hardware
-yet** - the printer has never been attached during this work.
+compressor and a CUPS filter wired end to end. All of it is tested, and the job the filter
+writes is **byte-identical to the reference driver's** - wrapper, framing, item sets,
+geometry, compressed image and padding - for every option combination
+`scripts/reference-compare.py` covers; the compressed image is separately byte-identical to
+the reference encoder of the standard. **Nothing has been validated on hardware yet** -
+the printer has never been attached during this work.
 
 scripts/make-test-job.py builds complete, reference-correct ZjStream jobs independently of
 the filter, which is useful for bring-up: it can emit either a payload compressed by the
@@ -93,8 +96,11 @@ linker and needs no SDK at all, so tests work regardless of the machine's toolch
 
 For the native build, scripts/build-native.sh picks a route and says which one it used:
 
-- **Apple's toolchain**, if the Xcode licence is accepted. This is the supported path.
-- **rust-lld with a rewritten stub SDK**, if it is not. macOS 27's SDK describes some
+- **Apple's toolchain.** Xcode's own `clang` and `ld` run even when the `/usr/bin` shims in
+  front of them refuse because the licence has not been accepted, so the script calls them
+  directly with an explicit SDK. The output is linked by Apple's linker against the real
+  SDK; accepting the licence remains the supported route and changes nothing else.
+- **rust-lld with a rewritten stub SDK**, if even that is unavailable. macOS 27's SDK describes some
   libraries with an architecture token, `arm64e.x1`, that the LLVM inside the current Rust
   toolchain does not recognise, so rust-lld rejects those .tbd files as malformed and cannot
   resolve libSystem. The script builds a link-only copy of the stubs without that token
@@ -154,6 +160,9 @@ same licence gate.
     $PY scripts/cupsraster.py dump <file>       # CUPS raster pages, validated against EOF
     $PY scripts/make-test-job.py --list         # deterministic bring-up test pages
     ./scripts/jbig-oracle.sh fetch              # reference JBIG encoder/decoder (test only)
+    $PY scripts/jbig-sweep.py                   # our encoder vs the reference, 42 comparisons
+    ./scripts/foo2zjs-oracle.sh fetch           # the reference driver, built here (test only)
+    $PY scripts/reference-compare.py            # our whole job vs the reference driver's
     $PY scripts/zjs-compare.py a.zjs b.zjs      # semantic job comparison
     ./scripts/verify-native.sh                  # ARM64 check for our binaries
     $PY scripts/rehearse-job.py                 # rehearse the CUPS -> filter boundary
@@ -205,18 +214,33 @@ Verified by execution, on real captured data where it matters:
 - The streaming filter: peak memory is flat in the job size (43 MB for a 299 MB raster,
   against 312 MB when it buffered the whole job), with byte-identical output before and
   after, and the reference decoder still reproducing every page.
-- **The JBIG compressor.** Its output is byte-identical to the reference implementation
-  across a 22-case sweep (random noise, odd widths, single rows and columns, stripe
-  boundaries, widths 1 to 1200, two stripe sizes), and four of those vectors are embedded
-  as golden tests that run on every build. The job layer is separately tested to reassemble
-  exactly what the compressor produced, and the raster stride is asserted to equal the
-  JBIG line length, since a mismatch there would silently shear every page.
+- **The JBIG compressor**, in both configurations it supports. Its output is byte-identical
+  to the reference encoder of the standard across 42 comparisons (`scripts/jbig-sweep.py`:
+  random noise, odd widths, single rows and columns, stripe boundaries, widths 1 to 1200),
+  and four oracle-derived vectors are embedded as golden tests that run on every build. The
+  job layer is separately tested to reassemble exactly what the compressor produced, and the
+  raster stride is asserted to equal the JBIG line length, since a mismatch there would
+  silently shear every page.
+- **The whole job, against a working driver.** `scripts/reference-compare.py` builds the
+  open driver that supports this printer and requires our filter's output to be
+  byte-identical to its, for the same page and options, once the clock-bearing
+  job-attribute line is removed. Seven cases pass: default Letter, A4, econo mode, density,
+  manual feed, three copies, and a two-page job. That covers the wrapper, the chunk
+  sequence, every item and its order, the geometry, the compressed image and the final
+  padding in one go.
+- **HP's own encoder constants**, read out of its binary rather than assumed: the BIH
+  options byte `0x5c`, order `3` and the adaptive-template default are visible in
+  `jbig::ZjbigEncoder`'s constructor, and every PJL literal the filter contains is listed in
+  `docs/differences.md`.
 
 Not verified:
 
 - Anything requiring the printer: USB identity, endpoint layout, whether the framing and
-  the uncompressed image are accepted, and whether a power cycle needs a firmware download.
-- A native ARM64 build of the final binaries, pending the licence fix above.
+  the uncompressed image are accepted, whether duplex needs host-side page handling, and
+  whether a power cycle needs a firmware download.
+- The media type codes for anything but plain paper, and whether HP's adaptive template
+  settings (as opposed to the reference driver's, which we match) matter to the decoder.
+  Both are in `docs/differences.md` with what settles them.
 
 ## Blockers that need the user
 
@@ -225,23 +249,24 @@ Not verified:
    the printer accepts.
 2. **Administrator access, to install.** Writing to /Library/Printers and creating a queue
    needs sudo. The build itself no longer needs anything beyond scripts/build-native.sh.
-3. Optional, and only a convenience: sudo xcodebuild -license accept restores Apple's
-   otool, nm, lipo and brew, and makes the native build take the supported route rather than
-   the rust-lld fallback described above.
+3. Optional, and only a convenience: sudo xcodebuild-license accept restores the `/usr/bin`
+   shims and `brew`. Nothing here depends on it any more - the toolchain's own binaries are
+   called directly - but it is the supported route, and the build says which one it used.
 
 ## Next steps
 
-1. Re-accept the Xcode licence and confirm cargo build emits an ARM64 binary.
-2. Attach the P1102 and run `scripts/preflight-usb.py`. It reports VID/PID, serial,
+1. Attach the P1102 and run `scripts/preflight-usb.py`. It reports VID/PID, serial,
    interface class and endpoint count, checks the serial against the one the queue asks
    for, and - by diffing two `--json` runs across a power cycle - whether the device
    re-enumerates with a different identity.
-3. Send a minimal page. The default path is now JBIG-compressed, so the first question is
-   simply whether a page prints; `P1102_RAW=1` switches the filter to the uncompressed
-   ZJT_RAW_IMAGE form if the compressed one is rejected.
-4. Only then look at golden-master comparison. The old filter cannot run here, so
-   reference output has to come from a capture or from another machine; options are in
-   docs/testing.md.
+2. Send a minimal page, with no build and no install: `scripts/make-test-job.py` writes a
+   complete job whose payload the reference encoder produced, and a raw queue sends it
+   through Apple's own USB backend. If nothing prints, `P1102_NO_PJL=1` resends the same
+   payload without the PJL wrapper, which separates a wrapper problem from an image one.
+3. If the compressed image is rejected, `P1102_RAW=1` switches the filter to the
+   uncompressed ZJT_RAW_IMAGE form, whose layout is the one thing here with no independent
+   confirmation.
+4. Then install the queue with `sudo ./scripts/install.sh` and print through it.
 
 ## Safety
 

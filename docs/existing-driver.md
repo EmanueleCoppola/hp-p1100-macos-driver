@@ -184,8 +184,12 @@ This is more severe than "will stop working in a future release": it cannot run 
 Consequences for the plan:
 
 - A PPD queue that points at `rastertozjs` will fail at the filter stage.
-- The "golden master from the working Intel driver" idea cannot be executed on this
-  machine as-is. Options are discussed under Next steps in the project README.
+- A golden master cannot be captured *from HP's filter* on this machine, because it cannot
+  be executed here. That is not the same as having no reference: the open driver that
+  supports this printer **can** be built and run here, and `scripts/reference-compare.py`
+  uses it to hold the whole job to byte identity. What HP's binary could not be run for, it
+  was still read for: its disassembly is where the BIH defaults and the PJL literal list in
+  this documentation come from.
 
 ## P1005 vs P1102 (CONFIRMED they are different driver bundles)
 

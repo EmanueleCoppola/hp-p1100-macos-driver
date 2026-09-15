@@ -48,6 +48,15 @@ experiments ahead of writing the encoder.
   The `START_PLANE` correspondence is the strongest external confirmation we have that
   HP's macOS filter and foo2zjs encode the same protocol.
 
+  **It is also runnable here.** `scripts/foo2zjs-oracle.sh` fetches the upstream tarball
+  (checksum pinned), builds it with Xcode's toolchain and runs it, so the comparison in
+  `scripts/reference-compare.py` is against the real driver rather than against a reading of
+  its source. The OpenPrinting database it ships is a primary source in its own right: the
+  `foo2zjs-z2` driver's `prototype` is `foo2zjs-wrapper -z2 -P -L0 %A`, and its record for
+  `HP-LaserJet_Pro_P1102` carries the printer's own IEEE 1284 identity
+  (`CMD:ZJS,PJL,ACL,HTTP;...;FWVER:20090924`), both of which are quoted in
+  `docs/protocol.md`.
+
 ## 3. Capture tooling
 
 The standard way to obtain ground truth for an undocumented USB raster protocol is to
@@ -86,7 +95,7 @@ linked or shipped, and neither is a source of copied code:
 
 | oracle | used for | how |
 |---|---|---|
-| **foo2zjs** | understanding and validating the ZjStream *container* | read the sources, compare chunk sequences |
+| **foo2zjs** | validating the *whole job* - wrapper, chunk framing, items, geometry, image and padding - byte for byte | `scripts/foo2zjs-oracle.sh` builds it; `scripts/reference-compare.py` compares |
 | **jbigkit 2.1** | validating our JBIG *compressed image*, byte for byte | `scripts/jbig-oracle.sh`, installed from a prebuilt Homebrew bottle |
 
 `jbigkit` is Markus Kuhn's reference implementation of the standard - the same library HP
@@ -113,8 +122,10 @@ contain, published in the standard, not copied implementation code.
 
 **JBIG is implemented, not deferred.** That supersedes the fallback reasoning this section
 used to carry: the encoder is written from the standard and is byte-identical to the
-reference implementation for the configuration it emits (one layer, one plane, no typical
-prediction, no adaptive template). The patent caveat in the JBIG library's licence text
+reference implementation for the configuration it emits (one resolution layer, one bit
+plane, typical prediction and the lowest-resolution layer's two-line template on, no
+adaptive template movement - the configuration both working drivers use for this family).
+The patent caveat in the JBIG library's licence text
 refers to arithmetic-coding patents from the 1980s and 1990s that are **LIKELY** expired, but
 that is unverified and worth confirming before any commercial distribution. See
 docs/jbig.md for the format and docs/differences.md for the parameters we emit.

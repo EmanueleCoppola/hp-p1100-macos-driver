@@ -31,10 +31,12 @@ with no libcups, no frameworks, no private frameworks and no rpaths. HP's filter
 (libcups, libcupsimage, libstdc++.6 and libSystem). The entire dependency surface of the
 replacement is the C library, which is what makes it hard for a macOS release to break it.
 
-One cosmetic artefact of building through the rust-lld fallback rather than Apple's toolchain:
-the recorded SDK version in the load command comes out as 11.0.0 rather than the real SDK,
-because rustc cannot ask xcrun for the SDK path while the licence is unaccepted. It is
-informational and does not affect the linked behaviour - the minimum OS is 11.0 either way.
+One cosmetic artefact of the rust-lld fallback route: the recorded SDK version in the load
+command comes out as 11.0.0 rather than the real SDK, because rustc cannot ask xcrun for the
+SDK path while the licence is unaccepted. It is informational and does not affect the linked
+behaviour - the minimum OS is 11.0 either way. Building through the Xcode toolchain directly,
+which `scripts/build-native.sh` now prefers, records the real SDK, because the SDK is handed
+to the linker explicitly.
 
 
 
@@ -137,11 +139,18 @@ written. See `docs/installation.md`.
 ## Remaining technical risk
 
 **The compressor is no longer the gap.** JBIG is implemented in `crates/p1102-jbig` and its
-output is byte-identical to the reference implementation of the standard, verified against
-four embedded golden vectors and a 22-case sweep. It emits the simplest conforming
-configuration (one layer, one plane, no typical prediction, no adaptive template, `L0` =
-128), which keeps the implementation small and stays inside what every conforming decoder
-must accept. Details and the exact parameters are in `docs/jbig.md`.
+output is byte-identical to the reference implementation of the standard: four embedded
+golden vectors, a 42-comparison sweep, and - the one that covers the whole path - the page
+images inside jobs that `scripts/reference-compare.py` matches against the reference driver
+byte for byte. It emits the configuration both working drivers use for this family (`0x5c`,
+typical prediction on, the two-line lowest-resolution template, `L0` = 128, no adaptive
+template movement); the parameters and their provenance are in `docs/jbig.md`.
+
+**Neither is the wrapper.** The job our filter writes - PJL wrapper, chunk sequence, item
+sets and their order, geometry, compressed image and final-chunk padding - is byte-identical
+to the reference driver's for the same page and options, across seven option combinations
+including a two-page job. The comparison is `scripts/reference-compare.py`, and what it
+cannot cover is listed in `docs/differences.md`.
 
 The uncompressed `ZJT_RAW_IMAGE` path is also implemented and selectable with
 `P1102_RAW=1`, because whether the printer accepts it is still an open hardware question
@@ -151,10 +160,10 @@ so choosing between the two encoders touches no other layer.
 What remains is therefore hardware validation, not design or implementation:
 
 1. Whether the printer accepts our framing, item sets and PJL wrapper at all.
-2. Whether it accepts our JBIG stream. The stream is standard-conforming and verified
-   against the reference, so a rejection here would mean a *printer-specific* constraint
-   rather than an encoder bug - which is exactly why the reference-correct payload from
-   `scripts/make-test-job.py` is worth trying, to tell those two cases apart.
+2. Whether it accepts our JBIG stream. The stream is byte-identical to the reference
+   driver's, so a rejection here would mean a *printer-specific* constraint rather than an
+   encoder bug, and the adaptive template (item 2 of `docs/differences.md`) is the one
+   parameter where HP's driver may differ from ours.
 3. Whether `ZJT_RAW_IMAGE` works, and whether the 128-pixel-aligned row stride is what it
    expects.
 4. Whether a power cycle needs a host-side firmware download. **LIKELY no**, but unverified.
@@ -168,6 +177,6 @@ docs/differences.md.
   endpoint layout, framing acceptance and the raw-image question are all unverified.
 - Whether a filter-based queue survives future macOS releases is a migration question
   rather than a design one; the core is positioned so that it does not matter.
-- Whether our *specific* JBIG configuration is accepted. It is standard-conforming and
-  byte-identical to the reference, so a rejection would point at a printer-side constraint
-  rather than at the encoder - but it is unverified either way.
+- Whether our *specific* JBIG configuration is accepted, and whether HP's adaptive template
+  settings matter to the printer's decoder. Both are byte-verified against the reference
+  driver and unverified against the device.

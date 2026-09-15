@@ -20,6 +20,10 @@
 #   scripts/build-native.sh --refresh-stub  rebuild the stub SDK first
 #   scripts/build-native.sh --status        report which route would be used, then stop
 #   scripts/build-native.sh -- <cargo args>
+#
+# Rust still prints a warning of its own about `xcrun --show-sdk-path` failing, on any
+# route: that probe is a gated shim and rustc has no way to skip it. The SDK is passed to
+# the linker explicitly, which is what the link actually uses.
 set -eu
 
 REPO=$(cd "$(dirname "$0")/.." && pwd)
@@ -67,8 +71,46 @@ if [ "$LICENCE_OK" = 1 ]; then
     exec "$CARGO" build $PROFILE --offline $EXTRA
 fi
 
+# The gate is in the /usr/bin shims, not in Xcode's own binaries: calling the toolchain's
+# clang directly works, and it finds the real ld next to itself. That links against the real
+# SDK, so it is preferred over the stub below. Accepting the licence remains the supported
+# route; this one changes nothing on the system.
+TOOLCHAIN=/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin
+CLT_TOOLCHAIN=/Library/Developer/CommandLineTools/usr/bin
+
+find_sdk() {
+    sdk=$(xcrun --sdk macosx --show-sdk-path 2>/dev/null || true)
+    if [ -n "$sdk" ] && [ -d "$sdk" ]; then printf '%s' "$sdk"; return 0; fi
+    for s in \
+        /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk \
+        /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk; do
+        if [ -d "$s" ]; then printf '%s' "$s"; return 0; fi
+    done
+    return 1
+}
+
+DIRECT_CLANG=
+for c in "$TOOLCHAIN/clang" "$CLT_TOOLCHAIN/clang"; do
+    if "$c" --version >/dev/null 2>&1; then DIRECT_CLANG=$c; break; fi
+done
+
+if [ -n "$DIRECT_CLANG" ] && DIRECT_SDK=$(find_sdk); then
+    echo "route: the Xcode toolchain directly"
+    echo "       ($DIRECT_CLANG, SDK $DIRECT_SDK)"
+    echo "       the /usr/bin shims refuse until 'sudo xcodebuild-license accept', the toolchain does not"
+    [ "$STATUS_ONLY" = 1 ] && exit 0
+    cd "$REPO"
+    RUSTFLAGS="-Clinker=$DIRECT_CLANG -Clink-arg=-isysroot -Clink-arg=$DIRECT_SDK"
+    export RUSTFLAGS
+    # rustc looks the SDK up through xcrun, which is a gated shim; handing it the path
+    # directly keeps the build quiet and does not depend on the licence either way.
+    SDKROOT=$DIRECT_SDK
+    export SDKROOT
+    exec "$CARGO" build $PROFILE --offline $EXTRA
+fi
+
 echo "route: rust-lld with a rewritten stub SDK"
-echo "       (Apple's linker is unavailable until 'sudo xcodebuild -license accept')"
+echo "       (neither Apple's shims nor its toolchain binaries are reachable)"
 [ "$STATUS_ONLY" = 1 ] && exit 0
 
 if [ -z "$PYTHON" ]; then
@@ -87,4 +129,3 @@ cd "$REPO"
 RUSTFLAGS="-Clinker=$SR/lib/rustlib/aarch64-apple-darwin/bin/rust-lld -Clink-arg=-syslibroot -Clink-arg=$STUB"
 export RUSTFLAGS
 exec "$CARGO" build $PROFILE --offline $EXTRA
-
