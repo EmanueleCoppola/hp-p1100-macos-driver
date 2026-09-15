@@ -11,6 +11,13 @@ The page bitmap is computed independently of the Rust code (the same way
 scripts/rehearse-job.py does it), so the comparison isolates the job encoding rather than
 mixing in the raster conversion.
 
+One scope limit, and it is asserted rather than assumed: the reference reads 1-bit PBM pages,
+so the page both implementations see is bilevel. That covers the job encoding - items, chunk
+framing, geometry, the compressed image - and says nothing about the 8 bits per pixel to 1 bit
+conversion, which this harness performs itself with the same threshold the filter uses
+(docs/differences.md item 11). A fixture with grey in it would quietly turn the case into a
+comparison of our thresholding against itself, so assert_bilevel() refuses one instead.
+
 Pass condition: the two jobs are byte-identical once the job-attribute line is removed,
 which carries the clock. Anything else is a real difference and is printed.
 
@@ -188,6 +195,27 @@ def without_timestamp(blob):
     return JOBATTR.sub(b'', blob)
 
 
+def assert_bilevel(data, cr, label):
+    """Refuse a fixture with grey in it, because the reference is fed a 1-bit page.
+
+    The bitmap handed to the reference below is thresholded here, at the same cut our filter
+    uses, so a case built from a raster with intermediate levels compares our conversion with
+    our own conversion rather than with the reference's. That is a silent loss of coverage, so
+    it is an error rather than a note: see docs/differences.md item 11.
+    """
+    for _, off, header, payload in cr.walk(data):
+        if header['bits_per_pixel'] != 8:
+            continue
+        start = off + cr.PAGE_HEADER_LEN
+        levels = sorted(set(data[start:start + payload]) - {0, 255})
+        if levels:
+            raise SystemExit(
+                '%s: the raster carries %d intermediate grey level(s) (first: %s), and the '
+                'reference is fed a bilevel page, so this case would no longer compare the '
+                'grey conversion with the reference - see docs/differences.md item 11'
+                % (label, len(levels), ', '.join(str(v) for v in levels[:4])))
+
+
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('--only', help='run only cases whose label contains this')
@@ -219,6 +247,7 @@ def main(argv):
         raster = os.path.join(case_dir, 'page.raster')
         size = make_raster(fixture, cups_opts, raster)
         data = open(raster, 'rb').read()
+        assert_bilevel(data, cr, label)
         page_headers = [h for _, _, h, _ in cr.walk(data)]
         ours_path = os.path.join(case_dir, 'ours.zjs')
         ours_size = our_job(cmd, raster, options, ours_path)
