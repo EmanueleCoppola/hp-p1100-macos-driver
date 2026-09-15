@@ -397,67 +397,60 @@ paragraph because the realistic way to break it is to regenerate the PPD from a 
 bundle - a P1505 or a P1560 offers other slots and other groups - and an option in neither list
 is a setting the queue would show, accept and never pass to the printer.
 
-## 11. Grey is screened by HP and thresholded by us. CONFIRMED difference, appearance only
 
-CUPS hands the filter 8 bits per pixel of grey - the PPD asks for exactly that
-(`cupsBitsPerColor 8`, `cupsColorSpace 0`) - and something has to turn it into the printer's one
-bit. We compare against a fixed threshold of 128, which is what `crates/p1102-raster` has done
-since the first commit. HP screens instead, and the mechanism is now read out of its binary
-rather than guessed at:
+## 11. HP sends two bits per pixel through a tone table; we send one. CONFIRMED difference
 
-- `ZjsMonoFormatter::startPage` calls `selectScreenTable(getModelName(), vdpi,
-  bits_per_pixel, &table, &rows, &cols)` once per page, then `ProcessMonoOneBit` or
-  `ProcessMonoTwoBit` according to the bits per pixel, and those call `_ScreenPixelsOneBit`
-  or `_ScreenPixelsTwoBit`.
-- The selector is straight-line string comparison on the model name. `"HP LaserJet
-  Professional P1560"` and `"HP LaserJet Professional P1600dn"` get `_sdtahx00` (16x16) at
-  one bit per pixel and `_sdtahx10` (12x12) at two. Every other model name - which is this
-  PPD's case, `*ModelName: "HP LaserJet Professional P1100"` - gets `_sdtahs10` (12x12)
-  when the raster's vertical resolution is 400 dpi, and `_sdtahr10` (12x12) for anything else,
-  which is what this printer produces: its PPD sets `HWResolution[600 600]` for *both* of its
-  `Resolutions` choices.
-- The comparison is `ink where ~pixel >= table[column]`, with pure white short-circuited to
-  white, the column index advancing one byte per pixel and wrapping at `rows`, and the table
-  pre-advanced by the caller from the line count.
-- `_sdtahx00` **is** a threshold matrix: 16x16 bytes spread over 0..253. The 12x12 ones are
-  not. `_sdtahr10` starts with 48 zero bytes and continues in 24-byte records
-  (`01 00 10 00 ... c`, `c` in the low thousands), it is initialized data in `__data`, and
-  nothing in the file's `__text` writes it. Its neighbours `_black600x1Screen` and
-  `_black600x2Screen` are 16x16 dispersed matrices as well, and nothing references them either.
+CUPS hands the filter 8 bits per pixel of grey (`cupsBitsPerColor 8`, `cupsColorSpace 0`), and
+something has to turn it into what the printer draws. We compare against a fixed threshold of
+128 and pack one bit per pixel, which is what `crates/p1102-raster` has done since the first
+commit and what the reference driver sends. HP does something else, and the difference is not a
+screen versus a threshold - it is a different bit depth:
 
-So the mechanism is settled and the table that *this* printer's model name selects is not yet
-reproduced. Read as bytes it would ink every non-white pixel, which cannot be what the working
-driver does, so something else is going on: an initializer, a relocation, or a second selector
-that resolves this family. That is where a continuation should start. An earlier version of
-this entry said the table "is built inside the filter and the path to it did not resolve";
-that is wrong in its first half - the tables are static data with symbols on them - and the
-selector and the loop above are what replaced it.
+- `main` derives two values from the raster header's `cupsCompression`: `bits = (compression &
+  1) + 1`, and `vdpi = compression & 0x3ffe` (falling back to `HWResolution[1]` only when that
+  is zero). It calls `ProcessMonoTwoBit` when `bits == 2` and `ProcessMonoOneBit` when
+  `bits == 1`.
+- This PPD's two `Resolutions` choices set `cupsCompression` 401 and 1. Both are odd, so `bits`
+  is 2 either way: **every job this queue produces takes HP's two-bit path.** 401 & 0x3ffe is
+  400, which is also the "vertical dpi" that `selectScreenTable` is given, so the default
+  resolution selects `_sdtahs10`; the `600x600dpi` choice, whose marker is 1, gives 0 there and
+  falls back to the raster's 600, selecting `_sdtahr10`.
+- `_ScreenPixelsTwoBit` indexes the table by the *pixel value* - `table[pixel * 48]` - and the
+  byte it finds holds four 2-bit values, one for each column of a group of four pixels; the row
+  comes from `(line % 12) * 4`. Each table is therefore 256 entries of 12 rows by 4 bytes:
+  12288 bytes, exactly the distance between the two symbols.
+- Decoded that way the tables are what they should be, and `scripts/hp-tone-table.py` reads them
+  out of the installed driver and checks it: entry 0 is all black, entry 255 all white, and the
+  entries between them are clustered-dot cells that get lighter as the grey value rises. On this
+  machine `_sdtahs10` has 0, 8, 16, 32, 41, 48, 64, 80 and 144 of its 144 cells at the lightest
+  level for grey 0, 32, 64, 96, 128, 160, 192, 224 and 255.
 
-Substituting a screen of our own would be a guess with the same standing as the threshold, so
-the threshold stays until the real table is identified.
+So HP's pages carry **two bits per pixel** - four levels per pixel, from a 12x12 clustered-dot
+cell chosen by grey level - while ours carry one, thresholded at 128. The protocol is untouched
+(the page is a bitmap either way), but the appearance of anything with grey in it is not:
+antialiased text and photographs get a hard edge from us where HP would print a dot pattern, and
+the printer would have four levels to work with instead of two.
 
-What it changes, and what it does not: the protocol is untouched - the page is a bitmap either
-way - but the *appearance* of anything with grey in it is not. Antialiased text gets harder
-edges from us, and a photograph or a gradient gets a hard edge where HP would print a pattern
-of dots. The byte-identity comparison against the reference driver does not cover this at all,
-because both sides of it see a thresholded page (see "How this list is measured now").
+What matching it would take, and why it is not done yet: the item side follows from the depth
+(`ZJI_VIDEO_BPP` and `ZJI_VIDEO_X` are already computed from `bits_per_pixel` in
+`crates/p1102-protocol`), but the image becomes **two bit planes** instead of one, so the encoder
+would have to emit two, and the chunk and plane shape HP uses for that has not been read out of
+its binary - `ZjsMonoFormatter::startPage` is where to look. The tone tables are HP's own data,
+so a legitimate implementation would read them out of the user's installed driver, which is what
+`scripts/hp-tone-table.py` does. And none of it can be validated without the printer: a wrong
+two-bit framing would stop the queue printing, where a wrong tone curve only looks wrong. That is
+why the threshold stays until there is a device to try it on.
 
-One observation settles whether it matters: print a graded fill or antialiased text, and compare
-it with the same page through HP's queue while that still runs. If ours looks worse in a way
-someone would notice, the work is to find HP's screen rather than to invent one.
+Two notes that belong with this entry. The depth question is the same one seen from the input
+side: our filter accepts 1 bit per pixel (copied through) and 8 (thresholded) and refuses
+anything else with a one-line error naming the depth, before writing a byte of the job - a
+4900-pixel-wide page relabelled as 2, 4 or 16 bits per pixel exits 1 with `ERROR: encoding job:
+unsupported raster depth: N bits per pixel`. And the reference comparison does not cover any of
+this, because the page both sides see there is bilevel (see "How this list is measured now").
 
-The depth this entry turns on is worth stating too, because HP handles one more case than we
-do. Its filter has a two-bit path as well - `ProcessMonoTwoBit` and `_ScreenPixelsTwoBit`, with
-`selectScreenTable` taking the bits per pixel as an argument - while ours accepts 1 bit per
-pixel (copied through, bit for bit) and 8 (thresholded), and refuses anything else with a
-one-line error naming the depth it was given, before writing a single byte of the job. That is
-measured rather than assumed: a 4900-pixel-wide page relabelled as 2, 4 or 16 bits per pixel
-exits 1 with `ERROR: encoding job: unsupported raster depth: N bits per pixel`, and a
-2-bits-per-colour raster with 4 bits per pixel is refused the same way. Nothing in this bundle
-asks for those depths - the PPD's only resolution choices set `cupsBitsPerColor 8` and
-`cupsColorSpace 0` - so the difference is a limit on hand-built or re-hosted jobs rather than
-a live one, and a refusal is the right answer there: a wrong-depth raster is not something to
-guess at.
+One observation settles whether the two-bit difference matters in practice: print a graded fill
+or antialiased text and compare it with the same page through HP's queue while that still runs.
+If ours looks worse in a way someone would notice, the work is the two-bit path above.
 
 ## What settles the unverified items
 
@@ -471,7 +464,7 @@ Each one maps to an observation the hardware test makes:
 | 5, duplex | send a two-page job with `Duplex=DuplexNoTumble`: the printer should prompt to flip the stack ("press the Go button"), and the back of each sheet should be the right way up, which CUPS's rotation has already arranged. Single-sided output with no prompt would mean the job needs host-side page *pairing*, not rotation |
 | 6, media codes | whether a non-plain-paper job prints correctly, or jams or misfeeds |
 | 10, media source | settled: the PPD's default is read and an explicit `InputSlot` overrides it. If a job ever prints one page and then waits for paper, the code it sends is DMBIN 4 (manual feed, the PPD's default) |
-| 11, grey conversion | print a graded fill or antialiased text: ours thresholds, HP's screens, so expect harder edges. HP's queue can be used for the comparison while it still exists |
+| 11, grey conversion | print a graded fill or antialiased text: ours sends one bit per pixel thresholded at 128 where HP's driver would have sent two bits from a 12x12 tone table, so expect harder edges from us. HP's queue can be used for the comparison while it still exists |
 
 Everything else that used to be listed as uncertain - the wrapper text, the item sets and
 their order, the page geometry, the JBIG configuration, the compressed image, the chunk

@@ -338,6 +338,11 @@ behind them were read off, and how the PJL literal list in `docs/differences.md`
 checked. `c++filt` is a harness from the same toolchain directory: `/usr/bin/c++filt` is
 gated too.
 
+The same route reads the data rather than the code: `scripts/hp-tone-table.py` finds the
+grey tone tables by symbol, decodes them as the driver does, and checks the structure - entry
+0 black, entry 255 white, entries in between getting lighter - which is how item 11 of
+`docs/differences.md` was settled.
+
 ## Hardware bring-up with no build at all
 
 ### Pre-flight, the moment the printer is attached
