@@ -2,10 +2,13 @@
 
 ## What gets installed, and where
 
-Three files, all under a directory we own, plus one new CUPS queue:
+Four files, all under a directory we own, plus one new CUPS queue:
 
     /Library/Printers/p1102/p1102-filter    our ARM64 CUPS filter
     /Library/Printers/p1102/p1102.ppd       generated PPD pointing at that filter
+    /Library/Printers/p1102/p1102-400.tones, p1102-600.tones
+                                            the two tone tables the p1102Grey option needs,
+                                            read out of the installed HP driver
     /Library/Printers/p1102/p1102.icns      the picture the printer row shows
     CUPS queue: HP_LaserJet_P1102_native    new queue, inherits the existing device URI
 

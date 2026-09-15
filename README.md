@@ -144,7 +144,7 @@ Remove it again, leaving HP's installation untouched:
     ./scripts/uninstall.sh --dry-run
     sudo ./scripts/uninstall.sh
 
-That installs the filter, the printer icon and a generated PPD into /Library/Printers/p1102, and creates a new
+That installs the filter, the printer icon, a generated PPD and the tone tables it reads into /Library/Printers/p1102, and creates a new
 queue alongside HP's. HP's installation is read but never written, SIP is untouched, and no
 kernel or system extension is involved.
 

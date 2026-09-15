@@ -65,7 +65,7 @@ die() { echo "error: $*" >&2; exit 1; }
 # stdin, so a gzipped one can be decompressed into it without a temporary file.
 ppd_diff() {
     diff - "$1" 2>/dev/null | grep -E '^[<>]' | grep -vE \
-        '^[<>] \*(%%|NickName|[a-zA-Z_@-]+\.Translation NickName/|cupsFilter: "application/vnd\.cups-(raster|command)|cupsCommands|APPrinterUtilityPath|APPrinterIconPath)' \
+        '^[<>] \*(%%|NickName|[a-zA-Z_@-]+\.Translation NickName/|cupsFilter: "application/vnd\.cups-(raster|command)|cupsCommands|APPrinterUtilityPath|APPrinterIconPath|p1102Grey)' \
         | grep -vE '^[<>] *$' || true
 }
 
@@ -218,6 +218,30 @@ echo "1. installing the filter, the icon and the PPD into $DEST"
 run mkdir -p "$DEST"
 run /usr/bin/install -m 0755 -o root -g wheel "$FILTER" "$DEST/p1102-filter"
 run /usr/bin/install -m 0644 -o root -g wheel "$ICON" "$DEST/p1102.icns"
+# The two tone tables the two-bit grey screening uses. They are HP data, so the installer
+# reads them out of the HP driver on this machine rather than carrying them here. A machine
+# without that driver still gets a working queue: only p1102Grey=Screened2 would fail, and
+# the filter says so when it is asked for it.
+if [ "$PYTHON_OK" = 1 ] && [ -f "$REPO/scripts/hp-tone-table.py" ]; then
+    tones_tmp=$(mktemp -d -t p1102-tones) || die "cannot create a temporary directory"
+    if "$PYTHON" "$REPO/scripts/hp-tone-table.py" --out "$tones_tmp" >/dev/null 2>&1 \
+        && [ -s "$tones_tmp/sdtahs10.bin" ] && [ -s "$tones_tmp/sdtahr10.bin" ]; then
+        run /usr/bin/install -m 0644 -o root -g wheel "$tones_tmp/sdtahs10.bin" \
+            "$DEST/p1102-400.tones"
+        run /usr/bin/install -m 0644 -o root -g wheel "$tones_tmp/sdtahr10.bin" \
+            "$DEST/p1102-600.tones"
+    else
+        echo "note: no HP driver to read the tone tables from, so this queue will not offer"
+        echo "      the two-bit grey screening. Everything else is unaffected."
+    fi
+    rm -f "$tones_tmp/sdtahs10.bin" "$tones_tmp/sdtahr10.bin"
+    rmdir "$tones_tmp" 2>/dev/null || true
+fi
+
+echo
+echo "   tone tables: an unprivileged copy is generated from the installed HP driver and"
+echo "                installed as p1102-400.tones and p1102-600.tones, which is what"
+echo "                p1102Grey=Screened2 reads."
 if [ "$DRY" = 1 ]; then
     # Generate the PPD somewhere harmless and check it, so a dry run says something about
     # the artifact as well as about the commands.
