@@ -278,10 +278,10 @@ Verified by execution, on real captured data where it matters:
 - The filter's option parsing, and the PPD generator (its output differs from HP's PPD by
   exactly the intended lines).
 - The PPD option mapping, tested against the real value names from the installed PPD:
-  `Duplex=DuplexNoTumble`/`DuplexTumble`/`None` (CUPS sends the PPD spelling, not the IPP
-  `sides=` one), `InputSlot=Manual` to the tray code, `pjlDensity` clamped to the 1..5 the
-  PPD offers, `EconoMode` and `pjlJamRecovery`, and the raster's `cupsMediaType` forwarded
-  as the media code. Unrecognised keys and values are ignored rather than guessed.
+  `Duplex=DuplexNoTumble`/`DuplexTumble`/`None` and the IPP `sides=` spellings of the same
+  choices, `InputSlot=Manual` to the tray code, `pjlDensity` clamped to the 1..5 the PPD
+  offers, `EconoMode` and `pjlJamRecovery`, and the raster's `cupsMediaType` forwarded as the
+  media code. Unrecognised keys and values are ignored rather than guessed.
   Options a job does not name are taken from the PPD, the way CUPS's filter interface expects
   and the way HP's driver does it: CUPS passes only what the user changed, so the file's
   `*Default*` keywords fill the rest and the command line overrides them.
@@ -301,10 +301,16 @@ Verified by execution, on real captured data where it matters:
   job layer is separately tested to reassemble exactly what the compressor produced, and the
   raster stride is asserted to equal the JBIG line length, since a mismatch there would
   silently shear every page.
+- **The two-bit screening**, as far as it can be without the printer: a page whose greys are
+  only 0 and 255 screens to itself, so a one-bit job and a two-bit job of the same document are
+  the same page, and a screened page survives the whole round trip - screen, encode into two
+  planes, frame, reassemble, decode with the reference decoder - with identical samples. The
+  screening rule itself is read out of HP's driver (item 11 of `docs/differences.md`); what it
+  looks like on paper and whether the printer takes that framing are the observations left.
 - **The whole job, against a working driver.** `scripts/reference-compare.py` builds the
   open driver that supports this printer and requires our filter's output to be
   byte-identical to its, for the same page and options, once the clock-bearing
-  job-attribute line is removed. Twenty-eight cases pass: the print options (defaults, econo
+  job-attribute line is removed. Thirty-one cases pass: the print options (defaults, econo
   mode, density, manual feed, three copies, two pages), both resolutions the PPD offers, every
   page size it declares plus a custom one, and the layout CUPS applies before rasterising
   (landscape, upside down, two pages per sheet). Between them they cover the wrapper, the
