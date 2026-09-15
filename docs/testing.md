@@ -125,7 +125,9 @@ not been accepted. Both routes run the same suite:
 ```
 
 `scripts/test-wasm.sh` runs the same suite on wasm32-wasip1, which links with Rust's own
-bundled rust-lld and needs no SDK. It is the fallback for a machine with no usable native
+bundled rust-lld and needs no SDK. One test is native-only: the CLI's argument test writes
+files, WASI has no temporary directory, and the harness leaves it out there. This is the
+fallback for a machine with no usable native
 toolchain, and it is what the CI-style checks used before the toolchain binaries were found.
 
 It passes an absolute runner path via `--config`, because cargo runs test
