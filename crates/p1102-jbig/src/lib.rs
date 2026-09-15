@@ -97,7 +97,7 @@ const FLUSH_SIG2: u64 = 0x0007_F800;
 /// T.82 resets it only at the first stripe unless SDRST is in use. The code and interval
 /// registers are reset for every stripe.
 pub struct QmEncoder<'a> {
-    st: &'a mut [u8; CONTEXTS],
+    st: &'a mut [u8],
     c: u64,
     a: u32,
     sc: u32,
@@ -107,7 +107,7 @@ pub struct QmEncoder<'a> {
 }
 
 impl<'a> QmEncoder<'a> {
-    pub fn new(st: &'a mut [u8; CONTEXTS], reuse_state: bool) -> Self {
+    pub fn new(st: &'a mut [u8], reuse_state: bool) -> Self {
         if !reuse_state {
             st.fill(0);
         }
@@ -249,6 +249,8 @@ impl<'a> QmEncoder<'a> {
 pub enum JbigError {
     /// The bitmap is smaller than width x height requires.
     BitmapTooSmall { need: usize, got: usize },
+    /// The number of bitmaps does not match the number of bit planes.
+    PlaneCount { expected: u8, got: usize },
     /// Width or height was zero.
     Empty,
 }
@@ -258,6 +260,9 @@ impl std::fmt::Display for JbigError {
         match self {
             JbigError::BitmapTooSmall { need, got } => {
                 write!(f, "bitmap too small: need {need} bytes, got {got}")
+            }
+            JbigError::PlaneCount { expected, got } => {
+                write!(f, "{got} bitmap(s) for a {expected}-plane image")
             }
             JbigError::Empty => write!(f, "image has zero width or height"),
         }
@@ -277,7 +282,11 @@ pub struct JbigEncoder {
     /// Bytes per line including padding to a whole byte.
     hbpl: usize,
     stripes: usize,
-    st: Box<[u8; CONTEXTS]>,
+    /// Bit planes: 1 for the bi-level page the default path sends, 2 for the two-bit page
+    /// HP's own driver sends (docs/differences.md item 11).
+    planes: u8,
+    /// One probability state table per plane, CONTEXTS bytes each.
+    st: Box<[u8]>,
 }
 
 impl JbigEncoder {
@@ -304,8 +313,24 @@ impl JbigEncoder {
             options,
             hbpl,
             stripes,
-            st: Box::new([0u8; CONTEXTS]),
+            planes: 1,
+            st: vec![0u8; CONTEXTS].into_boxed_slice(),
         }
+    }
+
+    /// Encode this many bit planes instead of one. Each plane is one bit of the pixel
+    /// value, most significant plane first: that is what the reference encoder writes when
+    /// it is given a PGM and told to use binary words rather than Gray-coded ones.
+    pub fn planes(mut self, planes: u8) -> Self {
+        let planes = planes.max(1);
+        self.planes = planes;
+        self.st = vec![0u8; CONTEXTS * planes as usize].into_boxed_slice();
+        self
+    }
+
+    /// How many bit planes this encoder will write.
+    pub fn plane_count(&self) -> u8 {
+        self.planes
     }
 
     pub fn bytes_per_line(&self) -> usize {
@@ -321,7 +346,7 @@ impl JbigEncoder {
         let mut b = [0u8; 20];
         b[0] = 0; // DL: first layer stored
         b[1] = 0; // D: highest layer stored, so a single layer
-        b[2] = 1; // one bit plane
+        b[2] = self.planes;
         b[3] = 0;
         b[4..8].copy_from_slice(&self.width.to_be_bytes());
         b[8..12].copy_from_slice(&self.height.to_be_bytes());
@@ -336,25 +361,45 @@ impl JbigEncoder {
     /// Encode a whole image. `bitmap` holds `height` rows of `bytes_per_line()` bytes,
     /// most significant bit first, set bit = ink.
     pub fn encode(&mut self, bitmap: &[u8]) -> Result<Vec<u8>, JbigError> {
+        self.encode_planes(&[bitmap])
+    }
+
+    /// The same, for an image of `plane_count()` bit planes: one bitmap per plane, in
+    /// plane order, most significant plane first.
+    ///
+    /// Stripe-major and plane-minor, which is the order the reference encoder writes: every
+    /// plane's stripe 0, then every plane's stripe 1, each stripe of each plane terminated
+    /// by its own marker. Each plane has its own coder state, carried across its stripes.
+    pub fn encode_planes(&mut self, bitmaps: &[&[u8]]) -> Result<Vec<u8>, JbigError> {
         if self.width == 0 || self.height == 0 {
             return Err(JbigError::Empty);
         }
-        let need = self.hbpl * self.height as usize;
-        if bitmap.len() < need {
-            return Err(JbigError::BitmapTooSmall {
-                need,
-                got: bitmap.len(),
+        if bitmaps.len() != self.planes as usize {
+            return Err(JbigError::PlaneCount {
+                expected: self.planes,
+                got: bitmaps.len(),
             });
+        }
+        let need = self.hbpl * self.height as usize;
+        for bitmap in bitmaps {
+            if bitmap.len() < need {
+                return Err(JbigError::BitmapTooSmall {
+                    need,
+                    got: bitmap.len(),
+                });
+            }
         }
         let mut out = Vec::with_capacity(need / 8 + 64);
         out.extend_from_slice(&self.bih());
         for stripe in 0..self.stripes {
-            out.extend_from_slice(&self.encode_stripe(bitmap, stripe));
+            for plane in 0..self.planes as usize {
+                out.extend_from_slice(&self.encode_stripe(bitmaps[plane], stripe, plane));
+            }
         }
         Ok(out)
     }
 
-    fn encode_stripe(&mut self, bitmap: &[u8], stripe: usize) -> Vec<u8> {
+    fn encode_stripe(&mut self, bitmap: &[u8], stripe: usize, plane: usize) -> Vec<u8> {
         let hbpl = self.hbpl;
         let xd = self.width as usize;
         let yd = self.height as usize;
@@ -380,7 +425,8 @@ impl JbigEncoder {
         };
 
         let body = {
-            let mut enc = QmEncoder::new(&mut self.st, !reset);
+            let base = plane * CONTEXTS;
+            let mut enc = QmEncoder::new(&mut self.st[base..base + CONTEXTS], !reset);
             for i in 0..lines {
                 let y = y0 + i;
                 let base = y * hbpl;
@@ -554,6 +600,89 @@ mod tests {
         assert_eq!(encode(8, 2, &[0xAA, 0x00]), want);
         let no_options = hex("0000010000000008000000020000008000000300be80ff02");
         assert_eq!(encode_with(8, 2, 0, &[0xAA, 0x00]), no_options);
+    }
+
+    /// Two planes: the fixture the reference encoder writes for a PGM of
+    /// `0 1 2 3 0 1 2 3 / 3 3 0 0 1 1 2 2` with binary (not Gray-coded) words.
+    #[test]
+    fn golden_two_planes_8x2() {
+        let want = hex("000002000000000800000002000000800000031cc17080ff02d0eaff02");
+        // Plane 0 is the high bit of each sample, plane 1 the low bit.
+        let plane0 = [0x33u8, 0xC3];
+        let plane1 = [0x55u8, 0xCC];
+        // Options 0x1c: TPDON | TPBON | DPON, without LRLTWO. That is the configuration
+        // the reference encoder picks for a multi-plane image (it sets LRLTWO only for a
+        // bi-level one), and it is what the golden above was captured with.
+        let got = JbigEncoder::with_options(8, 2, DEFAULT_L0, DEFAULT_ORDER, 0x1C)
+            .planes(2)
+            .encode_planes(&[&plane0, &plane1])
+            .unwrap();
+        assert_eq!(got, want);
+    }
+
+    /// Two planes across a stripe boundary: 8x130 samples of (x + y) % 4, so 130 lines is a
+    /// full stripe plus a two-line one. That is the case a per-plane coder state gets wrong.
+    #[test]
+    fn golden_two_planes_two_stripes() {
+        let want =
+            hex("000002000000000800000082000000800000031cc14eea73e05580ff02d0ce1fba64ff02ff02ff02");
+        let mut plane0 = vec![0u8; 130];
+        let mut plane1 = vec![0u8; 130];
+        for (y, (hi, lo)) in plane0.iter_mut().zip(plane1.iter_mut()).enumerate() {
+            let mut h = 0u8;
+            let mut l = 0u8;
+            for x in 0..8u32 {
+                let v = (x + y as u32) % 4;
+                if (v >> 1) & 1 == 1 {
+                    h |= 0x80 >> x;
+                }
+                if v & 1 == 1 {
+                    l |= 0x80 >> x;
+                }
+            }
+            *hi = h;
+            *lo = l;
+        }
+        let got = JbigEncoder::with_options(8, 130, DEFAULT_L0, DEFAULT_ORDER, 0x1C)
+            .planes(2)
+            .encode_planes(&[&plane0, &plane1])
+            .unwrap();
+        assert_eq!(got, want);
+    }
+
+    /// The number of bitmaps has to match the number of planes the encoder was built for.
+    #[test]
+    fn plane_count_must_match() {
+        let one = [0u8; 2];
+        let err = JbigEncoder::new(8, 2)
+            .planes(2)
+            .encode_planes(&[&one])
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                JbigError::PlaneCount {
+                    expected: 2,
+                    got: 1
+                }
+            ),
+            "{err}"
+        );
+        let err = JbigEncoder::new(8, 2)
+            .encode_planes(&[&one, &one])
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                JbigError::PlaneCount {
+                    expected: 1,
+                    got: 2
+                }
+            ),
+            "{err}"
+        );
+        assert_eq!(JbigEncoder::new(8, 2).plane_count(), 1);
+        assert_eq!(JbigEncoder::new(8, 2).planes(2).plane_count(), 2);
     }
 
     /// 16x4 with a denser pattern.

@@ -28,6 +28,9 @@ ORACLE = os.path.join(HERE, 'jbig-oracle.sh')
 PROTOTYPE = os.path.join(HERE, 'jbig-encode.py')
 
 OPTIONS = (0x5C, 0x00)
+# Multi-plane pages use the configuration the reference encoder picks for them: options
+# 0x1c, i.e. TPDON | TPBON | DPON without LRLTWO, which it sets only for bi-level images.
+PLANE_OPTIONS = 0x1C
 
 
 def write_pbm(path, width, height, rows):
@@ -48,6 +51,31 @@ def rows_of(width, height, ink):
                 row[x >> 3] |= 0x80 >> (x & 7)
         out.append(row)
     return out
+
+
+def write_pgm(path, width, height, rows, maxval=3):
+    with open(path, 'wb') as f:
+        f.write(b'P5\n%d %d\n%d\n' % (width, height, maxval))
+        for row in rows:
+            f.write(bytes(row))
+
+
+def plane_cases():
+    """Two-plane pages: the shape HP's own driver sends (docs/differences.md item 11)."""
+    rng = random.Random(20260916)
+
+    def samples(width, height, f):
+        return [[f(x, y) for x in range(width)] for y in range(height)]
+
+    return [
+        ('blank 128x128', 128, 128, samples(128, 128, lambda x, y: 0)),
+        ('solid 128x128', 128, 128, samples(128, 128, lambda x, y: 3)),
+        ('two levels 64x8', 64, 8, samples(64, 8, lambda x, y: (x // 4) % 2)),
+        ('tone ramp 300x260', 300, 260, samples(300, 260, lambda x, y: min(3, (x * 4) // 300))),
+        ('noise 129x130, just over a stripe', 129, 130,
+         samples(129, 130, lambda x, y: rng.randrange(4))),
+        ('128x256, one stripe boundary', 128, 256, samples(128, 256, lambda x, y: (y // 37) % 4)),
+    ]
 
 
 def cases():
@@ -104,8 +132,27 @@ def main(argv):
             elif args.verbose:
                 print('  ok  %-28s options 0x%02x  %d bytes' % (name, options, len(a)))
 
-    print('%d comparisons over %d cases, %d configurations'
-          % (checked, len(cases()), len(OPTIONS)))
+    planes = plane_cases()
+    for name, width, height, rows in planes:
+        pgm = os.path.join(work, 'case.pgm')
+        write_pgm(pgm, width, height, rows)
+        ref = os.path.join(work, 'ref.jbg')
+        ours = os.path.join(work, 'ours.jbg')
+        subprocess.run([ORACLE, 'encode', pgm, ref, '-b', '-p', str(PLANE_OPTIONS)], check=True)
+        subprocess.run([sys.executable, PROTOTYPE, pgm, ours, '--quiet', '--planes', '2',
+                        '--options', str(PLANE_OPTIONS)], check=True)
+        a = open(ref, 'rb').read()
+        b = open(ours, 'rb').read()
+        checked += 1
+        if a != b:
+            failures.append('%s, 2 planes at options 0x%02x: %d vs %d bytes'
+                            % (name, PLANE_OPTIONS, len(a), len(b)))
+        elif args.verbose:
+            print('  ok  %-28s 2 planes, options 0x%02x  %d bytes'
+                  % (name, PLANE_OPTIONS, len(a)))
+
+    print('%d comparisons over %d bi-level cases and %d two-plane cases'
+          % (checked, len(cases()), len(planes)))
     for line in failures:
         print('  MISMATCH %s' % line)
     if failures:

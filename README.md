@@ -166,7 +166,7 @@ same licence gate.
     $PY scripts/cupsraster.py dump <file>       # CUPS raster pages, validated against EOF
     $PY scripts/make-test-job.py --list         # deterministic bring-up test pages
     ./scripts/jbig-oracle.sh fetch              # reference JBIG encoder/decoder (test only)
-    $PY scripts/jbig-sweep.py                   # our encoder vs the reference, 42 comparisons
+    $PY scripts/jbig-sweep.py                   # our encoder vs the reference: 48 comparisons
     ./scripts/foo2zjs-oracle.sh fetch           # the reference driver, built here (test only)
     $PY scripts/reference-compare.py            # our whole job vs the reference driver's
     $PY scripts/zjs-compare.py a.zjs b.zjs      # semantic job comparison
@@ -269,10 +269,11 @@ Verified by execution, on real captured data where it matters:
   37.5 MB for 313 MB - a ten times larger job for 0.3% more memory - against 312 MB for the
   last of those when the filter buffered the whole job. Output was byte-identical across the
   change, and the reference decoder still reproduces every page.
-- **The JBIG compressor**, in both configurations it supports. Its output is byte-identical
-  to the reference encoder of the standard across 42 comparisons (`scripts/jbig-sweep.py`:
-  random noise, odd widths, single rows and columns, stripe boundaries, widths 1 to 1200),
-  and four oracle-derived vectors are embedded as golden tests that run on every build. The
+- **The JBIG compressor**, in both configurations it supports, and in one plane or two. Its
+  output is byte-identical to the reference encoder of the standard across 48 comparisons
+  (`scripts/jbig-sweep.py`: random noise, odd widths, single rows and columns, stripe
+  boundaries, widths 1 to 1200, and six two-plane pages), and five oracle-derived vectors are
+  embedded as golden tests that run on every build. The
   job layer is separately tested to reassemble exactly what the compressor produced, and the
   raster stride is asserted to equal the JBIG line length, since a mismatch there would
   silently shear every page.
