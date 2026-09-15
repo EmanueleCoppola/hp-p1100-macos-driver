@@ -404,21 +404,27 @@ pub fn encode_raster_stream<R: Read, W: Write>(
     let mut enc = Encoder::new();
     let mut pending: Vec<u8> = Vec::new();
 
+    // Read the first page before writing anything. A stream that is not a raster at all - the
+    // wrong file, or an upstream filter that died before its first page - then leaves the
+    // printer with nothing, rather than a PJL prologue and an unfinished document to wait on.
+    let mut stream = RasterStream::new(reader);
+    let mut pixels: Vec<u8> = Vec::new();
+    let mut next = stream.next_page(&mut pixels)?;
+    if next.is_none() {
+        return Err(Error::NoPages);
+    }
+
     start_job(&mut enc, opts);
     flush_pending(&mut enc, &mut pending, out)?;
 
-    let mut stream = RasterStream::new(reader);
-    let mut pixels: Vec<u8> = Vec::new();
     let mut pages = 0usize;
-    while let Some(header) = stream.next_page(&mut pixels)? {
+    while let Some(header) = next.take() {
         enc.page_start(&geometry(&header, opts));
         write_image(&mut enc, &header, &pixels, opts)?;
         enc.page_end(opts.duplex);
         flush_pending(&mut enc, &mut pending, out)?;
         pages += 1;
-    }
-    if pages == 0 {
-        return Err(Error::NoPages);
+        next = stream.next_page(&mut pixels)?;
     }
     finish_job(&mut enc, opts);
     flush_pending(&mut enc, &mut pending, out)?;
@@ -1348,6 +1354,21 @@ mod tests {
         );
     }
 
+    /// A stream that is not a raster at all must leave the writer untouched. The filter streams
+    /// its output to the printer as it goes, so anything written before the input is validated
+    /// is a PJL prologue and an unfinished document for the printer to wait on.
+    #[test]
+    fn a_stream_that_is_not_a_raster_writes_nothing() {
+        let mut out: Vec<u8> = Vec::new();
+        let err = encode_raster_stream(&b"not a raster at all"[..], &mut out, &Options::default())
+            .unwrap_err();
+        assert!(matches!(err, Error::Raster(_)), "{err:?}");
+        assert!(
+            out.is_empty(),
+            "{} bytes were written before the error",
+            out.len()
+        );
+    }
     #[test]
     fn a_corrupt_raster_is_reported_not_guessed() {
         let mut r = raster(&[(8, 2, "Letter")]);

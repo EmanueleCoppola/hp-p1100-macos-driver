@@ -146,6 +146,13 @@ the property is flatness rather than a single figure. Reproduce it with a multi-
 
 The output was byte-identical before and after that refactor, which is how it was checked.
 
+Streaming has one ordering rule of its own: nothing is written until the **first page has been
+read and validated**. The printer receives bytes as the filter produces them, so a stream that
+is not a raster at all - the wrong file, or an upstream filter that died before its first page -
+would otherwise leave it holding a PJL prologue and an unfinished document, waiting. Holding one
+page header before starting costs nothing and makes the failure mode "nothing arrives, and CUPS
+reports why".
+
 
 
 ## Installation shape
