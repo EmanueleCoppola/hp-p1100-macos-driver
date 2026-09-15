@@ -71,7 +71,8 @@ obscurely.
 
 ## Installing
 
-    cargo build --release          # needs the Xcode licence accepted, see docs/testing.md
+    ./scripts/build-native.sh      # a plain 'cargo build --release' also works if the
+                                   # Xcode licence is accepted; see docs/testing.md
     sudo ./scripts/install.sh
 
 Review the plan first, which needs no privileges and prints every command it would run:

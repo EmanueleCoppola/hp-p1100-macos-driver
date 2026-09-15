@@ -95,7 +95,7 @@ fi
 
 if [ "$checked" = 0 ]; then
     echo
-    echo "Nothing to check yet: build with 'cargo build --release' and install with"
+    echo "Nothing to check yet: build with './scripts/build-native.sh' and install with"
     echo "./scripts/install.sh, then run this again."
 fi
 

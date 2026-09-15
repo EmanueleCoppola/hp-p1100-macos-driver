@@ -83,26 +83,34 @@ CUPS and without a printer.
 
 ## Building and testing
 
-    cargo check --workspace          # works today
+    cargo check --workspace        # type-check only, no linker needed
     rustup target add wasm32-wasip1
-    ./scripts/test-wasm.sh           # the full test suite, works today
-    cargo build --release            # needs Apple's linker; see below
+    ./scripts/test-wasm.sh         # the full test suite, no linker needed
+    ./scripts/build-native.sh      # the real native ARM64 binaries
 
-**Compiling native binaries is blocked on this machine** until the Xcode licence is
-re-accepted, because /usr/bin/clang, /usr/bin/ld and even brew refuse to run:
+The test suite runs on wasm32-wasip1 because that target links with Rust's own bundled
+linker and needs no SDK at all, so tests work regardless of the machine's toolchain state.
 
-    sudo xcodebuild -license accept
+For the native build, scripts/build-native.sh picks a route and says which one it used:
 
-Running Rust's bundled rust-lld against the CLT SDK was tried and does not work: the SDK's
-libSystem.tbd declares no plain arm64-macos target, so libSystem symbols do not resolve.
-Details in docs/testing.md. Until then the pure-logic tests run on wasm32-wasip1 under
-Node's WASI implementation, which needs no linker and no SDK.
+- **Apple's toolchain**, if the Xcode licence is accepted. This is the supported path.
+- **rust-lld with a rewritten stub SDK**, if it is not. macOS 27's SDK describes some
+  libraries with an architecture token, `arm64e.x1`, that the LLVM inside the current Rust
+  toolchain does not recognise, so rust-lld rejects those .tbd files as malformed and cannot
+  resolve libSystem. The script builds a link-only copy of the stubs without that token
+  (scripts/make-stub-sdk.py, non-destructive, in ~/.cache) and links against it. The output is
+  an ordinary native arm64 binary linked against the real runtime libSystem; only the link
+  step differed.
+
+Either route produces binaries that `scripts/verify-native.sh` reports as
+`Mach-O 64-bit executable arm64`.
 
 ## Installing, printing, removing
 
+
 Build and test:
 
-    cargo build --release
+    ./scripts/build-native.sh
     rustup target add wasm32-wasip1 && ./scripts/test-wasm.sh
 
 Install (see docs/installation.md for what lands where, and why):
@@ -208,9 +216,14 @@ Not verified:
 
 ## Blockers that need the user
 
-1. **Compilation.** sudo xcodebuild -license accept (needs the admin password).
-2. **Hardware.** The P1102 is not attached, so USB descriptors and on-printer behaviour
-   cannot be observed.
+1. **Hardware.** The P1102 is not attached, so USB descriptors and on-printer behaviour
+   cannot be observed. This is the one that matters: every remaining question is about what
+   the printer accepts.
+2. **Administrator access, to install.** Writing to /Library/Printers and creating a queue
+   needs sudo. The build itself no longer needs anything beyond scripts/build-native.sh.
+3. Optional, and only a convenience: sudo xcodebuild -license accept restores Apple's
+   otool, nm, lipo and brew, and makes the native build take the supported route rather than
+   the rust-lld fallback described above.
 
 ## Next steps
 

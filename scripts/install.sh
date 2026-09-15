@@ -74,12 +74,12 @@ fi
 if [ ! -x "$FILTER" ]; then
     if [ "$DRY" = 1 ]; then
         echo "note: $FILTER does not exist yet; a real run would stop here."
-        echo "      build it with 'cargo build --release' (and, if that fails with an"
-        echo "      Xcode licence error: sudo xcodebuild -license accept)"
+        echo "      build it with './scripts/build-native.sh'"
     else
         die "$FILTER not found; build it first:
-    cargo build --release
-  (if that fails with an Xcode licence error, run: sudo xcodebuild -license accept)"
+    scripts/build-native.sh
+  (which uses Apple's linker when the Xcode licence is accepted and rust-lld with a
+   rewritten stub SDK when it is not; see docs/testing.md)"
     fi
 else
     arch=$(/usr/bin/file -b "$FILTER")

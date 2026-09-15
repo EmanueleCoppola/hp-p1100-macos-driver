@@ -31,6 +31,7 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
+NATIVE_FILTER = os.path.join(REPO, 'target/release/p1005-filter')
 WASM_FILTER = os.path.join(REPO, 'target/wasm32-wasip1/debug/p1005-filter.wasm')
 PPD = '/etc/cups/ppd/HP_LaserJet_Professional_P1102.ppd'
 
@@ -41,6 +42,17 @@ def load(name):
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
+
+
+def filter_command(extra_env=None):
+    """How to run the filter: the real native binary if it is built, else the wasm build.
+
+    The native build is the artifact that would be installed, so it is preferred. The wasm
+    build exists for machines where native linking is unavailable; see docs/testing.md.
+    """
+    if os.path.exists(NATIVE_FILTER):
+        return [NATIVE_FILTER], 'native'
+    return wasi_command(extra_env), 'wasm'
 
 
 def wasi_command(extra_env=None):
@@ -76,12 +88,16 @@ def make_raster(text, out_path):
 
 def run_filter(raster_path, options, out_path, raw=False):
     overrides = {'P1005_RAW': '1'} if raw else {}
-    cmd = wasi_command(overrides) + [WASM_FILTER, '1', 'manu', 'rehearsal', '1', options, raster_path]
+    prefix, route = filter_command(overrides)
+    if route == 'native':
+        cmd = prefix + ['1', 'manu', 'rehearsal', '1', options, raster_path]
+    else:
+        cmd = prefix + [WASM_FILTER, '1', 'manu', 'rehearsal', '1', options, raster_path]
     env = dict(os.environ)
     env.update(overrides)
     with open(out_path, 'wb') as dst:
         proc = subprocess.run(cmd, stdout=dst, stderr=subprocess.PIPE, env=env)
-    return proc.returncode, proc.stderr.decode('utf-8', 'replace').strip()
+    return proc.returncode, proc.stderr.decode('utf-8', 'replace').strip(), route
 
 
 def expected_pages(raster_bytes, cr):
@@ -157,8 +173,10 @@ def main(argv):
                     help='rehearse the uncompressed ZJT_RAW_IMAGE path instead')
     args = ap.parse_args(argv)
 
-    if not os.path.exists(WASM_FILTER):
+    if not (os.path.exists(NATIVE_FILTER) or os.path.exists(WASM_FILTER)):
         return fail('build the filter first:\n'
+                    '    scripts/build-native.sh\n'
+                    '  or, where native linking is unavailable:\n'
                     '    cargo build --target wasm32-wasip1 -p p1005-filter --offline')
 
     cr = load('cupsraster')
@@ -179,11 +197,11 @@ def main(argv):
         size = make_raster(args.text, raster_path)
         print('  1. cgpdftoraster (Apple, native) produced a %d byte CUPS raster' % size)
 
-    code, stderr = run_filter(raster_path, args.options, job_path, raw=args.raw)
+    code, stderr, route = run_filter(raster_path, args.options, job_path, raw=args.raw)
     if code != 0:
         return fail('the filter exited %d\n%s' % (code, stderr))
     job = open(job_path, 'rb').read()
-    print('  2. our filter produced a %d byte job' % len(job))
+    print('  2. our %s filter produced a %d byte job' % (route, len(job)))
     for line in stderr.splitlines():
         print('       %s' % line)
 

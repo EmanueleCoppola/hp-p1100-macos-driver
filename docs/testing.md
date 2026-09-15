@@ -40,29 +40,54 @@ macOS 27.0 (build 26A428), Darwin 27.0.0, Apple M2 Max, arm64
 
 5. `sudo` is not passwordless (`sudo -n true` -> `a password is required`).
 
-### Attempted workaround: link with Rust's own `rust-lld`
+### Building natively without Apple's toolchain
 
-Rust ships `rust-lld` (and `ld64.lld`) in its sysroot, and the CLT SDK is present at
-`/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk`, so linking without Apple's `cc`
-was tried:
+Rust ships `rust-lld` in its sysroot, so linking without Apple's `cc` was attempted long
+before it worked, and the first diagnosis of why it failed was wrong. The symptom was
+`undefined symbol: _opendir`, `_pthread_mutexattr_destroy` and so on; the earlier note here
+blamed a missing plain `arm64-macos` target in `libSystem.tbd`. That is not the cause.
 
-```bash
-RUSTFLAGS="-Clinker=<sysroot>/lib/rustlib/aarch64-apple-darwin/bin/rust-lld \
-           -Clink-arg=-syslibroot -Clink-arg=/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk" \
-  cargo build
+The real cause is a token. macOS 27's SDK describes some libraries with an architecture the
+LLVM inside the current Rust toolchain does not know, and lld rejects the whole TAPI file
+rather than the entry:
+
+```text
+rust-lld: error: could not load TAPI file at .../libSystem.tbd: malformed file
+  libSystem.tbd:4:20: error: unknown architecture
+        arm64e.x1-macos, arm64e.x1-maccatalyst ]
+        ^~~~~~~~~~~~~~~
 ```
 
-`rust-lld` is correctly dispatched in `darwin` flavor (`-flavor darwin`, `-platform_version`),
-and it reads the SDK stubs, which are `tbd-version: 4` - a format it supports. It still
-fails with `undefined symbol: _opendir`, `_pthread_mutexattr_destroy` and so on, i.e. it
-cannot pull symbols out of `libSystem`. The likely reason is that this SDK's
-`libSystem.tbd` declares library-level targets of
-`[x86_64-macos, x86_64-maccatalyst, arm64e-macos, arm64e-maccatalyst, arm64e.x1-macos, arm64e.x1-maccatalyst]`
-- there is no plain `arm64-macos`, which is what `aarch64-apple-darwin` emits. Apple's
-`ld64` evidently maps `arm64` onto the `arm64e` stub; `rust-lld` does not.
+With the file rejected, `libSystem`, `libc` and `libm` all fail to load, which is what the
+undefined symbols were really reporting. Apple's `ld64` understands the token, which is why
+clang works and rust-lld does not.
 
-Conclusion: this is not worth pursuing further. Accepting the Xcode licence is the real
-fix, and it also restores `otool`, `nm`, `lipo`, `strings` and `brew`.
+**The fix, and it works.** `scripts/make-stub-sdk.py` writes a link-only copy of the SDK's
+stubs with the offending entries removed from their target lists - non-destructive, in
+`~/.cache/p1005-stub-sdk`, nothing outside that directory is touched. For an arm64 link those
+entries never apply anyway, so the symbol sets are the ones Apple's linker would use. Then:
+
+```bash
+scripts/build-native.sh          # picks the route and says which one it used
+```
+
+produces ordinary native binaries:
+
+```text
+target/release/p1005:        Mach-O 64-bit executable arm64
+target/release/p1005-filter: Mach-O 64-bit executable arm64
+```
+
+Linking against stubs only describes the library at link time; the binary imports the real
+runtime `libSystem` from the OS. The output runs natively and is verified against the
+reference decoder exactly as the wasm build was.
+
+Accepting the Xcode licence remains the supported route, and it also restores `otool`,
+`nm`, `lipo`, `strings` and `brew`. This exists so the project can be built and verified
+without it, not as a replacement for it.
+
+### Working workaround: run tests on wasm32-wasip1
+
 
 ### Working workaround: run tests on wasm32-wasip1
 
@@ -342,7 +367,31 @@ It exits non-zero if anything Intel-only is found. The detection has been self-t
 ways: HP's `rastertozjs` and `usbink` are reported `INTEL` and fail, while Apple's universal
 `cups/backend/usb` is reported native and passes.
 
+### Result, executed
+
+```text
+./scripts/verify-native.sh
+  p1005                  native   Mach-O 64-bit executable arm64
+  p1005-filter           native   Mach-O 64-bit executable arm64
+  OK: nothing Intel-only found.
+```
+
+The native binaries were then checked against the same oracle as everything else, rather
+than being trusted because they link:
+
+- the CLI's generated test page is **byte-identical** to the job from the reference-verified
+  Python path;
+- the filter, given a real 31 MB CUPS raster produced by Apple's own cgpdftoraster, emits a
+  job whose image the **reference decoder** decodes back to exactly the expected bitmap
+  (4992x6400, 3,993,600 bytes);
+- the native and the wasm builds produce **semantically identical** jobs, so the verification
+  done through wasm earlier carries over to the artifact that would actually be installed.
+
+What remains unverified about the native path is only what needs the printer: no page has
+ever been sent to one.
+
 ## Comparing two jobs, old driver against ours
+
 
 Phase 8 asks for tooling that compares outputs semantically rather than byte for byte.
 `scripts/zjs-compare.py` does that:
