@@ -505,6 +505,12 @@ invoke it *through* CUPS, and the reason is worth recording so nobody assumes ot
   it does not know fails with `Unknown destination MIME type`, and asking for
   `printer/*` selects the built-in PostScript path. The last filter in a PPD is only ever
   run by cupsd.
+   Three variants were tried before that was accepted as final: a `*cupsFilter2` line declaring
+   the filter's output type, which is ignored (`No filter to convert from text/plain to
+   application/vnd.cups-raw`); the same with `application/vnd.cups-postscript` as the output,
+   where the shorter built-in text-to-PostScript path wins instead; and an explicit input type
+   with `-i application/vnd.cups-raster`, which still looks the conversion up in the MIME
+   database rather than in the PPD (`... from application/vnd.cups-raster to ...`).
 - **cupsd cannot be started as a non-root user here.** `/usr/sbin/cupsd` is mode
   `0500 root:wheel`, so a private instance on a high port is not possible. Driving our filter
   through CUPS requires a queue, which requires the install step, which requires sudo.
