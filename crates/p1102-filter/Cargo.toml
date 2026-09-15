@@ -6,6 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+p1102-raster = { path = "../p1102-raster" }
 p1102-job = { path = "../p1102-job" }
 p1102-protocol = { path = "../p1102-protocol" }
 

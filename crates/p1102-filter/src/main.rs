@@ -15,6 +15,7 @@
 use std::env;
 use std::fs;
 use std::io::{self, Write};
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -55,7 +56,15 @@ fn main() -> ExitCode {
     let options = args.get(5).cloned().unwrap_or_default();
     let input_file = args.get(6).filter(|p| !p.is_empty()).cloned();
 
-    let opts = build_options(&options);
+    let mut opts = build_options(&options);
+    // The two-bit screening needs HP's tone tables, which are files rather than options: they
+    // live beside this binary, where install.sh puts them, or wherever P1102_TONES points.
+    if opts.screened {
+        match load_tone_tables() {
+            Ok(tables) => opts.tone_tables = Some(tables),
+            Err(e) => return fail(&e),
+        }
+    }
     let stdout = io::stdout();
     let mut out = Counting {
         inner: io::BufWriter::new(stdout.lock()),
@@ -231,4 +240,41 @@ mod tests {
         assert!(o.jam_recovery_auto);
         assert!(!o.pjl);
     }
+}
+
+/// The two tone tables the two-bit screening needs: from `P1102_TONES` when it is set, and
+/// from beside this binary otherwise, which is where `scripts/install.sh` puts them.
+fn load_tone_tables() -> Result<p1102_job::ToneTables, String> {
+    let dir = match env::var("P1102_TONES") {
+        Ok(dir) => PathBuf::from(dir),
+        Err(_) => env::current_exe()
+            .map_err(|e| format!("cannot find this filter's own path: {e}"))?
+            .parent()
+            .ok_or("this filter is not in a directory")?
+            .to_path_buf(),
+    };
+    let read = |name: &str| -> Result<Vec<u8>, String> {
+        let path = dir.join(name);
+        let bytes = fs::read(&path).map_err(|e| {
+            format!(
+                "p1102Grey=Screened2 needs {}, and reading it failed: {e}. Run \
+                 'scripts/hp-tone-table.py --out DIR' and install what it writes, or point \
+                 P1102_TONES at it",
+                path.display()
+            )
+        })?;
+        if bytes.len() < p1102_raster::TONE_TABLE_LEN {
+            return Err(format!(
+                "{} is {} bytes; a whole tone table is {}",
+                path.display(),
+                bytes.len(),
+                p1102_raster::TONE_TABLE_LEN
+            ));
+        }
+        Ok(bytes)
+    };
+    Ok(p1102_job::ToneTables {
+        at_400: read("p1102-400.tones")?,
+        at_600: read("p1102-600.tones")?,
+    })
 }
