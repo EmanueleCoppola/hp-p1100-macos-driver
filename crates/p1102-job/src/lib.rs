@@ -63,6 +63,11 @@ pub struct Options {
     pub econo_mode: bool,
     /// `pjlJamRecovery`: true selects `AUTO`, false `OFF`.
     pub jam_recovery_auto: bool,
+    /// The `p1102Grey` option this repository's PPD offers: `Screened2` asks for the two-bit
+    /// screening HP's driver does, `Mono1` (the default) for the one-bit thresholding the
+    /// reference driver sends. The tables themselves are the caller's to supply, because only
+    /// the filter knows where they are installed.
+    pub screened: bool,
     /// Input tray, from the PPD's `InputSlot`.
     pub source: u32,
     /// Timestamp for the `JOBATTR` line, `YYYYMMDDHHMMSS`.
@@ -85,6 +90,7 @@ impl Default for Options {
             density: DEFAULT_DENSITY,
             econo_mode: false,
             jam_recovery_auto: false,
+            screened: false,
             source: source::ONLY_ONE,
             timestamp: "19700101000000".to_string(),
             duplex: zduplex::OFF,
@@ -263,6 +269,7 @@ fn apply_one_option(opts: &mut Options, key: &str, value: &str) {
         }
         "EconoMode" => opts.econo_mode = is_true(value),
         "pjlJamRecovery" => opts.jam_recovery_auto = is_true(value),
+        "p1102Grey" => opts.screened = value == "Screened2",
         _ => {}
     }
 }
@@ -290,7 +297,7 @@ pub fn apply_ppd_defaults(opts: &mut Options, ppd: &str) {
         // resolution - reaches us through the raster page header, which already reflects them.
         if matches!(
             key,
-            "InputSlot" | "Duplex" | "EconoMode" | "pjlDensity" | "pjlJamRecovery"
+            "InputSlot" | "Duplex" | "EconoMode" | "pjlDensity" | "pjlJamRecovery" | "p1102Grey"
         ) {
             apply_one_option(opts, key, value.trim().trim_matches('"'));
         }
@@ -1512,5 +1519,28 @@ mod tone_table_tests {
         let body = strip_pjl_framing(&marked_400);
         assert_eq!(&body[..4], STREAM_SIGNATURE);
         assert!(!decode(body).unwrap().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod screened_option_tests {
+    use super::*;
+
+    /// The option that asks for the two-bit screening: named on the command line, and named as
+    /// the PPD's default, which is how a job that says nothing at all gets it.
+    #[test]
+    fn the_grey_option_selects_the_screening() {
+        let mut opts = Options::default();
+        assert!(!opts.screened, "one bit is the default");
+
+        apply_ppd_options(&mut opts, "p1102Grey=Screened2");
+        assert!(opts.screened);
+
+        apply_ppd_options(&mut opts, "p1102Grey=Mono1");
+        assert!(!opts.screened);
+
+        let mut opts = Options::default();
+        apply_ppd_defaults(&mut opts, "*Defaultp1102Grey: Screened2\n");
+        assert!(opts.screened);
     }
 }
