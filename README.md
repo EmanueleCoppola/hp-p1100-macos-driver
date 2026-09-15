@@ -81,7 +81,9 @@ middle stage is ours.
     crates/p1102-filter/     The CUPS filter binary: a thin wrapper around p1102-job.
     crates/p1102-cli/        Offline tooling: inspect rasters, dump streams, encode a job.
     scripts/                 inspection tools, test runner, PPD generator, installer.
-    assets/p1102.icns        the printer icon the queue shows, built by scripts/make-icns.py.
+    assets/p1102.icns        the printer icon the queue shows, built by scripts/make-icns.py
+                             (docs/installation.md says from what, and how closely the checked-in
+                             file matches a fresh build).
     docs/                    findings, written as they are confirmed.
     fixtures/inputs/         tiny deterministic source documents.
     LICENSE, LICENSE-MIT, LICENSE-APACHE   dual MIT / Apache-2.0

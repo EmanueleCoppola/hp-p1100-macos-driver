@@ -109,14 +109,24 @@ CUPS's own notion of a printer icon is a different thing, and worth not confusin
 for byte: `/icons/<queue>.png` is one built-in picture for all of them, so nothing a driver writes
 reaches the CUPS web interface that way. The PPD key is the macOS path, and the only one.
 
-The icon we install is drawn by `scripts/make-icns.py`, which is code rather than a borrowed
-picture: it carries this repository's licence, and it is redrawn at each size the icns container
-needs instead of being resampled down from one large bitmap. `--from FILE` builds the container
-from a PNG of your own instead, and the installer takes `--icon FILE` to install a different one:
+The icon we install is built by `scripts/make-icns.py` from `assets/p1102-photo.webp`, a
+photograph of this printer, with the badge on its front panel repainted: HP's mark is removed and
+"EC" is drawn in the same dark oval, in the colours the photograph uses, and everything else in the
+picture is left alone. `--drawn` builds the container in code instead, with no photograph in it at
+all, and `--from FILE` builds it from a PNG of your own; the installer takes `--icon FILE` to
+install a different one:
 
     PYTHON=/opt/homebrew/bin/python3.13
     $PYTHON scripts/make-icns.py                    # rewrite assets/p1102.icns
+    $PYTHON scripts/make-icns.py --drawn            # the code-drawn picture instead
     $PYTHON scripts/make-icns.py --from my-art.png  # from a picture of your own
+    $PYTHON scripts/make-icns.py --out /tmp/i.icns  # somewhere else, to compare first
+
+The checked-in `assets/p1102.icns` came from an earlier revision of the badge drawing: rebuilding
+it now changes about 15,000 of the 1.8 million pixels across the container's ten slices, every one
+of them inside a small box around the badge - 2 to 3% of the frame area, in the same place at every
+size. Two runs of the script agree byte for byte, so this is a stale artifact rather than a
+non-deterministic one, and the file in the tree is the picture the icon work was reviewed against.
 
 `install.sh` refuses an icon that is not an icns macOS can read back, by round-tripping the file
 through `iconutil` before anything is written. The failure it catches is silent by nature: a
