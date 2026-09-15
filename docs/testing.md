@@ -348,6 +348,21 @@ grey tone tables by symbol, decodes them as the driver does, and checks the stru
 
 ## Hardware bring-up with no build at all
 
+In order, once the printer is on the desk:
+
+1. `scripts/preflight-usb.py` - what the machine and CUPS can see, read-only, and
+   the first thing to run.
+2. `p1102 send /tmp/square.zjs` (or the two-line backend invocation below) - a real
+   page through the transport a queue uses: no build, no install, no administrator.
+3. the raw queue below, if the page printed but the whole CUPS path still needs checking - the
+   one step here that wants `sudo`.
+4. `scripts/rehearse-job.py` and `scripts/verify-all.sh` - the CUPS boundary and
+   everything else, which need no printer, and are what to re-run after any change.
+5. `sudo ./scripts/install.sh` - the queue that replaces HP's, last, once the
+   printer is known to accept what we send.
+
+The rest of this section is those steps in full.
+
 ### Pre-flight, the moment the printer is attached
 
 `scripts/preflight-usb.py` reports what the machine can see, read-only and with no
