@@ -50,8 +50,16 @@ and writing stdout, so it is trivially ARM64 and testable offline.
 
 The objection is that it inherits a deprecated path. The CUPS PPD API has been marked
 deprecated since CUPS 1.6 / macOS 10.8 with removal warned of, and Apple's own tracker
-carries a "Deprecate printer drivers" item. That said, macOS 26 did **not** remove PPD
-support wholesale, and vendors still ship PPDs for macOS 26.x.
+carries a "Deprecate printer drivers" item.
+
+What deprecation means in practice was measured on this machine rather than assumed from a
+version number. It runs **macOS 27.0** (build 26A428); `lpadmin` and `cupsctl` work; five of the
+queues here are driven by PPDs in `/etc/cups/ppd`; and Apple still ships **419** PPDs under
+`/Library/Printers/PPDs/Contents/Resources`, including the `hp1100.ppd.gz` this printer's own
+queue was built from. So the path is deprecated and alive, and every existing queue on this Mac
+uses it - which is what makes building on it the shortest route to a working queue rather than a
+bet on a dead mechanism. The deprecation is an argument for keeping the core separable, which is
+what the decision below does; it is not an argument for avoiding a path that still works.
 
 ### Option B - CUPS 3.x / OpenPrinting Printer Application
 
@@ -65,8 +73,9 @@ packaged application, and on macOS it does not map onto the existing
 
 Most future-proof: the printer becomes an IPP endpoint the OS sees as driverless. Also
 the most work, and it still needs the same ZjStream encoder underneath. Note that the
-CUPS web administration interface on `localhost:631` is no longer supported in macOS 26,
-so a daemon must not assume that surface exists.
+CUPS web interface on `localhost:631` serves pages but answers "Web Interface is Disabled" for
+the parts that configure printers - measured here on macOS 27 with CUPS 2.3.4 - so a daemon must
+not assume that surface is usable.
 
 ## Decision
 
@@ -79,7 +88,8 @@ Reasons, in order of weight:
    work is identical in all three options. It is now written with no CUPS, USB or
    packaging dependency, so re-hosting it later is cheap and does not invalidate it.
 2. `lpadmin` continues to work even where the CUPS web UI does not, so a PPD queue is
-   still creatable on macOS 26. Option A restores printing soonest.
+   still creatable on the macOS this was measured on (27.0). Option A restores printing
+   soonest.
 3. Options B and C need a JBIG encoder and a working USB path before they can do anything
    a filter cannot, so choosing them first would add packaging work ahead of the actual
    unknown.

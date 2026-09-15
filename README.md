@@ -189,6 +189,29 @@ See the wasm section in docs/testing.md, including a caveat about node's WASI.
         fixtures/inputs/text-1p.txt > /tmp/1p.raster
     $PY scripts/cupsraster.py dump /tmp/1p.raster
 
+## How the plan maps onto this repository
+
+The request had eleven phases. Where each one landed, and what its evidence is:
+
+| phase | artifact | state |
+|---|---|---|
+| 1. inventory the installed stack | `docs/existing-driver.md` | done, from `lpstat`, `ioreg`, the registry, `pkgutil` and the files themselves |
+| 2. find the obsolete Intel component | `docs/existing-driver.md` component table | done: 337 Mach-O binaries in the HP installation, none with an arm64 slice |
+| 3. determine the protocol | `docs/protocol.md`, `crates/p1102-protocol` | done, and the encoder's output is byte-identical to the reference driver's for the same page |
+| 4. check for a known open protocol | `docs/research.md` | done: the reference implementation is built and run here as a test oracle |
+| 5. firmware handling | `docs/protocol.md` | resolved for this bundle (no firmware blob, none uploaded); the device side needs the printer |
+| 6. design the replacement | `docs/architecture.md` | done: PPD plus filter, chosen explicitly over a Printer Application and re-hosting kept cheap |
+| 7. Rust implementation | `crates/` | done: four pure libraries, a CLI and the filter, no dependencies beyond libSystem |
+| 8. golden-master comparison | `scripts/reference-compare.py` | done in the only form available: 28 cases against the reference driver, since HP's binary cannot run on this Mac |
+| 9. real printer testing | `scripts/make-test-job.py`, `docs/testing.md` | **blocked**: needs the printer attached, and the first test needs no build, no install and no administrator |
+| 10. native ARM64 verification | `scripts/verify-native.sh` | done for the binaries and the chain; the print-time process check needs a print |
+| 11. installation | `scripts/install.sh`, `scripts/uninstall.sh` | done, with a dry run that checks the PPD it would install; a real install needs `sudo` |
+
+Phase 9 is the one that is blocked outright, and it needs the printer. Phases 5, 10 and 11 each
+have a part that only a print or a `sudo` install can complete. Nothing else is deferred, and
+nothing is deferred to a *later* design decision: the parts that wait are all observations of one
+device.
+
 ## What is verified, and what is not
 
 Verified by execution, on real captured data where it matters:
