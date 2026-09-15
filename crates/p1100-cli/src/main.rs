@@ -1,15 +1,15 @@
-//! `p1102` command line tool.
+//! `p1100` command line tool.
 //!
 //! Deliberately dependency-free and usable before CUPS integration exists, so the
 //! protocol work can be tested on its own:
 //!
 //! ```text
-//! p1102 raster-info   <cups-raster-file>
-//! p1102 raster-to-mono1 <cups-raster-file> <out.raw>
-//! p1102 raster-to-zjs <cups-raster-file> <out.zjs> [--no-pjl]
+//! p1100 raster-info   <cups-raster-file>
+//! p1100 raster-to-mono1 <cups-raster-file> <out.raw>
+//! p1100 raster-to-zjs <cups-raster-file> <out.zjs> [--no-pjl]
 //!               [--2bit --tone-table FILE]  screen grey into two bits
-//! p1102 zjs-dump      <zjs-file>
-//! p1102 wrap --bih <file> [--bid <file> ...] --width W --height H --resolution R \
+//! p1100 zjs-dump      <zjs-file>
+//! p1100 wrap --bih <file> [--bid <file> ...] --width W --height H --resolution R \
 //!            [--bits N] [--paper-code N] [--no-pjl] -o <out.zjs>
 //! ```
 
@@ -17,12 +17,12 @@ use std::env;
 use std::fs;
 use std::process::{Command, ExitCode};
 
-use p1102_job::{encode_raster_job, Options as JobOpts, TestPattern};
-use p1102_protocol::{
+use p1100_job::{encode_raster_job, Options as JobOpts, TestPattern};
+use p1100_protocol::{
     decode, op_name, pjl_epilogue, pjl_prologue, strip_pjl_framing, Encoder, JobOptions,
     PageGeometry, PjlSettings,
 };
-use p1102_raster::{to_mono1, RasterReader, DEFAULT_THRESHOLD};
+use p1100_raster::{to_mono1, RasterReader, DEFAULT_THRESHOLD};
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -55,19 +55,19 @@ fn main() -> ExitCode {
 }
 
 const USAGE: &str = "\
-p1102 - HP LaserJet Professional P1102 tooling
+p1100 - HP LaserJet Professional P1100 family tooling
 
 USAGE:
-  p1102 raster-info    <cups-raster-file>
-  p1102 raster-to-mono1 <cups-raster-file> <out.raw>
-  p1102 raster-to-zjs  <cups-raster-file> <out.zjs> [--no-pjl]
+  p1100 raster-info    <cups-raster-file>
+  p1100 raster-to-mono1 <cups-raster-file> <out.raw>
+  p1100 raster-to-zjs  <cups-raster-file> <out.zjs> [--no-pjl]
                        [--2bit --tone-table FILE]
-  p1102 test-page      <pattern> [-o <out.zjs>] [--page letter|a4|legal] [--dpi N]
+  p1100 test-page      <pattern> [-o <out.zjs>] [--page letter|a4|legal] [--dpi N]
                                   [--raw] [--no-pjl] [--list]
-  p1102 zjs-dump       <zjs-file>
-  p1102 wrap --bih <file> [--bid <file> ...] --width W --height H --resolution R
+  p1100 zjs-dump       <zjs-file>
+  p1100 wrap --bih <file> [--bid <file> ...] --width W --height H --resolution R
              [--bits N] [--paper-code N] [--no-pjl] -o <out.zjs>
-  p1102 send <job.zjs> [--device URI] [--queue NAME] [--timeout SECS] [--dry-run]
+  p1100 send <job.zjs> [--device URI] [--queue NAME] [--timeout SECS] [--dry-run]
 
 NOTES:
   raster-to-zjs and test-page produce complete, printable jobs: the page image is JBIG
@@ -78,9 +78,9 @@ NOTES:
   without CUPS or a source document. To send a job with no build and no filter at all,
   point a raw queue at the device and push the file straight through it:
 
-      p1102 test-page square -o /tmp/square.zjs
-      sudo lpadmin -p P1102_raw -E -v usb://... -m raw
-      lp -d P1102_raw -o raw /tmp/square.zjs
+      p1100 test-page square -o /tmp/square.zjs
+      sudo lpadmin -p P1100_raw -E -v usb://... -m raw
+      lp -d P1100_raw -o raw /tmp/square.zjs
 
   `wrap` frames an *already encoded* JBIG image, which is how a reference-compressed
   payload can be produced for comparison; see scripts/make-test-job.py. --bits says how many
@@ -89,7 +89,7 @@ NOTES:
   screens grey into (docs/differences.md item 11).";
 
 /// Apple's own CUPS backend: the transport a queue uses, world-executable, and the only thing
-/// that has to run to put a job on the wire. `p1102 send` wraps it so the bring-up notes are one
+/// that has to run to put a job on the wire. `p1100 send` wraps it so the bring-up notes are one
 /// command rather than a DEVICE_URI dance.
 const USB_BACKEND: &str = "/usr/libexec/cups/backend/usb";
 
@@ -193,7 +193,7 @@ fn zjs_dump(args: &[String]) -> Result<(), String> {
             c.header.signature
         );
         for it in &c.items {
-            let value = if it.ty == p1102_protocol::item_type::UINT32 && it.payload.len() == 4 {
+            let value = if it.ty == p1100_protocol::item_type::UINT32 && it.payload.len() == 4 {
                 format!(
                     "u32={}",
                     u32::from_be_bytes([
@@ -203,7 +203,7 @@ fn zjs_dump(args: &[String]) -> Result<(), String> {
                         it.payload[3]
                     ])
                 )
-            } else if it.ty == p1102_protocol::item_type::STRING {
+            } else if it.ty == p1100_protocol::item_type::STRING {
                 let end = it
                     .payload
                     .iter()
@@ -275,7 +275,7 @@ fn raster_to_zjs(args: &[String]) -> Result<(), String> {
         pjl: !args.iter().any(|a| a == "--no-pjl"),
         // One table for both slots: this command is for trying a page out, and which of the two
         // HP's marker selects is the filter's business, not its.
-        tone_tables: tone_table.map(|t| p1102_job::ToneTables {
+        tone_tables: tone_table.map(|t| p1100_job::ToneTables {
             at_400: t.clone(),
             at_600: t,
         }),
@@ -368,17 +368,17 @@ fn test_page(args: &[String]) -> Result<(), String> {
         height = (f64::from(height) * f).round() as u32;
     }
 
-    let bitmap = p1102_job::test_page_bitmap(pattern, width, height);
+    let bitmap = p1100_job::test_page_bitmap(pattern, width, height);
     let opts = JobOpts {
         encoding: if raw {
-            p1102_job::ImageEncoding::Raw
+            p1100_job::ImageEncoding::Raw
         } else {
-            p1102_job::ImageEncoding::Jbig
+            p1100_job::ImageEncoding::Jbig
         },
         pjl,
         ..JobOpts::default()
     };
-    let job = p1102_job::encode_bitmap_job(&bitmap, width, height, dpi, *paper, &opts)
+    let job = p1100_job::encode_bitmap_job(&bitmap, width, height, dpi, *paper, &opts)
         .map_err(|e| e.to_string())?;
     fs::write(&out, &job).map_err(|e| format!("cannot write {out}: {e}"))?;
     eprintln!(
@@ -402,7 +402,7 @@ fn wrap(args: &[String]) -> Result<(), String> {
     let mut width = 0u32;
     let mut height = 0u32;
     let mut resolution = 600u32;
-    let mut paper = p1102_protocol::paper::LETTER;
+    let mut paper = p1100_protocol::paper::LETTER;
     let mut bits = 1u32;
     let mut pjl = true;
 
@@ -462,12 +462,12 @@ fn wrap(args: &[String]) -> Result<(), String> {
         return Err("--width and --height are required".into());
     }
     let bih = read_file(&bih_path)?;
-    if bih.len() != p1102_protocol::JBIG_BIH_LEN {
+    if bih.len() != p1100_protocol::JBIG_BIH_LEN {
         return Err(format!(
             "{} is {} bytes; the JBIG BIH must be exactly {} bytes",
             bih_path,
             bih.len(),
-            p1102_protocol::JBIG_BIH_LEN
+            p1100_protocol::JBIG_BIH_LEN
         ));
     }
     let mut bid_data = Vec::new();
@@ -511,8 +511,8 @@ fn wrap(args: &[String]) -> Result<(), String> {
 #[cfg(all(test, not(target_os = "wasi")))]
 mod tests {
     use super::*;
-    use p1102_protocol::{decode, item, strip_pjl_framing};
-    use p1102_raster::{encode_page_header, PageHeader, SYNC_RASTER3};
+    use p1100_protocol::{decode, item, strip_pjl_framing};
+    use p1100_raster::{encode_page_header, PageHeader, SYNC_RASTER3};
 
     fn tiny_raster(width: u32, height: u32, path: &str) {
         let header = PageHeader {
@@ -529,7 +529,7 @@ mod tests {
 
     /// A table of the documented shape: 256 grey levels of a 12x12 cell, four levels apart.
     fn tone_table() -> Vec<u8> {
-        let mut t = vec![0u8; p1102_raster::TONE_TABLE_LEN];
+        let mut t = vec![0u8; p1100_raster::TONE_TABLE_LEN];
         for grey in 0..256usize {
             let level = (grey / 85) as u8;
             for row in 0..12usize {
@@ -557,7 +557,7 @@ mod tests {
     fn raster_to_zjs_takes_its_arguments() {
         // A relative scratch directory, not the system temporary one: std::env::temp_dir is not
         // implemented under WASI, and this suite runs on wasm as well as natively.
-        let dir = std::path::PathBuf::from("target/p1102-cli-test");
+        let dir = std::path::PathBuf::from("target/p1100-cli-test");
         fs::create_dir_all(&dir).expect("create the scratch directory");
         let raster = dir.join("page.raster");
         let out = dir.join("page.zjs");
@@ -575,7 +575,7 @@ mod tests {
         let job = fs::read(&out).unwrap();
         assert_eq!(
             &job[..4],
-            p1102_protocol::STREAM_SIGNATURE,
+            p1100_protocol::STREAM_SIGNATURE,
             "no PJL means the body starts at the signature"
         );
         assert_eq!(item_of(&job, item::VIDEO_BPP), 1);
@@ -643,7 +643,7 @@ fn send(args: &[String]) -> Result<(), String> {
             }
         }
     }
-    let job = job.ok_or("send needs a job file: p1102 send <job.zjs> [--device URI]")?;
+    let job = job.ok_or("send needs a job file: p1100 send <job.zjs> [--device URI]")?;
     if !dry && !std::path::Path::new(&job).exists() {
         return Err(format!("no such job file: {job}"));
     }
@@ -664,7 +664,7 @@ fn send(args: &[String]) -> Result<(), String> {
         }
     };
     let user = env::var("USER").unwrap_or_else(|_| "user".to_string());
-    let argv = ["1", user.as_str(), "p1102 send", "1", "", job.as_str()];
+    let argv = ["1", user.as_str(), "p1100 send", "1", "", job.as_str()];
     if dry {
         println!("DEVICE_URI={device} {USB_BACKEND} {}", argv.join(" "));
         return Ok(());

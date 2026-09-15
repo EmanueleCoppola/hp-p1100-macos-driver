@@ -1,12 +1,12 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/p1102-protocol",
-    "crates/p1102-raster",
-    "crates/p1102-job",
-    "crates/p1102-jbig",
-    "crates/p1102-filter",
-    "crates/p1102-cli",
+    "crates/p1100-protocol",
+    "crates/p1100-raster",
+    "crates/p1100-job",
+    "crates/p1100-jbig",
+    "crates/p1100-filter",
+    "crates/p1100-cli",
 ]
 
 [workspace.package]

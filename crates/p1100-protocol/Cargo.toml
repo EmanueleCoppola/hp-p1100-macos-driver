@@ -1,5 +1,5 @@
 [package]
-name = "p1102-protocol"
+name = "p1100-protocol"
 description = "ZjStream (ZJS) encoder and decoder for HP host-based LaserJets"
 version.workspace = true
 edition.workspace = true

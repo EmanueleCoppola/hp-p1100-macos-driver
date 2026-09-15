@@ -1,7 +1,8 @@
 //! CUPS filter: `application/vnd.cups-raster` in, ZjStream out.
 //!
-//! This replaces HP's `rastertozjs` for the HP LaserJet Professional P1102. It is a native
-//! ARM64 binary, where HP's is x86_64-only and cannot launch on this Mac at all.
+//! This replaces HP's `rastertozjs` for the HP LaserJet Professional P1100 family, of which
+//! the P1102 is the model it was developed and verified against. It is a native ARM64
+//! binary, where HP's is x86_64-only and cannot launch on this Mac at all.
 //!
 //! CUPS invokes filters as:
 //!
@@ -19,12 +20,12 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use p1102_job::{encode_raster_stream, format_timestamp, ImageEncoding, Options};
+use p1100_job::{encode_raster_stream, format_timestamp, ImageEncoding, Options};
 
 /// The calling convention, for the case where somebody runs this by hand rather than through
 /// CUPS.
 const USAGE: &str = "\
-usage: p1102-filter job-id user title copies options [file]
+usage: p1100-filter job-id user title copies options [file]
 
 This is a CUPS filter: the raster arrives on stdin, or in `file` when CUPS supplies one, and
 the encoded ZjStream job is written to stdout. `options` is CUPS's space-separated option
@@ -32,7 +33,7 @@ string, which carries the PPD settings (Duplex=..., InputSlot=Manual, pjlDensity
 EconoMode=..., pjlJamRecovery=...).
 
 To drive the pipeline outside CUPS, use the offline tools instead:
-  p1102 --help                inspect rasters, dump streams, build a test page
+  p1100 --help                inspect rasters, dump streams, build a test page
   scripts/preflight-usb.py    what the USB bus and CUPS see
   scripts/rehearse-job.py     the whole CUPS -> filter boundary, with no printer";
 
@@ -58,7 +59,7 @@ fn main() -> ExitCode {
 
     let mut opts = build_options(&options);
     // The two-bit screening needs HP's tone tables, which are files rather than options: they
-    // live beside this binary, where install.sh puts them, or wherever P1102_TONES points.
+    // live beside this binary, where install.sh puts them, or wherever P1100_TONES points.
     if opts.screened {
         match load_tone_tables() {
             Ok(tables) => opts.tone_tables = Some(tables),
@@ -146,39 +147,39 @@ fn build_options(options: &str) -> Options {
     // the built-in defaults stand, which is what happened before this existed.
     if let Ok(path) = env::var("PPD") {
         match fs::read_to_string(&path) {
-            Ok(text) => p1102_job::apply_ppd_defaults(&mut opts, &text),
+            Ok(text) => p1100_job::apply_ppd_defaults(&mut opts, &text),
             Err(e) => {
                 eprintln!("WARNING: cannot read PPD {path}: {e}; using built-in defaults")
             }
         }
     }
-    p1102_job::apply_ppd_options(&mut opts, options);
+    p1100_job::apply_ppd_options(&mut opts, options);
 
     for token in options.split_whitespace() {
         // The PPD's own options are mapped by the library, which is where the mapping can
         // be tested against the real option strings.
-        if let Some(v) = token.strip_prefix("P1102Pjl=") {
+        if let Some(v) = token.strip_prefix("P1100Pjl=") {
             opts.pjl = matches!(v, "true" | "True" | "1" | "on");
         }
     }
 
-    if let Ok(v) = env::var("P1102_DENSITY") {
+    if let Ok(v) = env::var("P1100_DENSITY") {
         if let Ok(v) = v.parse::<u32>() {
             opts.density = v;
         }
     }
-    if let Ok(v) = env::var("P1102_ECONOMODE") {
+    if let Ok(v) = env::var("P1100_ECONOMODE") {
         opts.econo_mode = v == "1" || v.eq_ignore_ascii_case("true");
     }
-    if let Ok(v) = env::var("P1102_NO_PJL") {
+    if let Ok(v) = env::var("P1100_NO_PJL") {
         if v == "1" || v.eq_ignore_ascii_case("true") {
             opts.pjl = false;
         }
     }
-    // JBIG compression is the default, as the printer expects. P1102_RAW forces the
+    // JBIG compression is the default, as the printer expects. P1100_RAW forces the
     // uncompressed image instead, which exists only to test on hardware whether the
     // printer accepts ZJT_RAW_IMAGE at all.
-    if let Ok(v) = env::var("P1102_RAW") {
+    if let Ok(v) = env::var("P1100_RAW") {
         if v == "1" || v.eq_ignore_ascii_case("true") {
             opts.encoding = ImageEncoding::Raw;
         }
@@ -199,8 +200,8 @@ mod encoding_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use p1102_job::DEFAULT_DENSITY;
-    use p1102_protocol::duplex as zduplex;
+    use p1100_job::DEFAULT_DENSITY;
+    use p1100_protocol::duplex as zduplex;
 
     #[test]
     fn defaults_are_the_printers_normal_settings() {
@@ -234,7 +235,7 @@ mod tests {
 
     #[test]
     fn explicit_options_override_defaults() {
-        let o = build_options("pjlDensity=5 EconoMode=True pjlJamRecovery=True P1102Pjl=false");
+        let o = build_options("pjlDensity=5 EconoMode=True pjlJamRecovery=True P1100Pjl=false");
         assert_eq!(o.density, 5);
         assert!(o.econo_mode);
         assert!(o.jam_recovery_auto);
@@ -242,10 +243,10 @@ mod tests {
     }
 }
 
-/// The two tone tables the two-bit screening needs: from `P1102_TONES` when it is set, and
+/// The two tone tables the two-bit screening needs: from `P1100_TONES` when it is set, and
 /// from beside this binary otherwise, which is where `scripts/install.sh` puts them.
-fn load_tone_tables() -> Result<p1102_job::ToneTables, String> {
-    let dir = match env::var("P1102_TONES") {
+fn load_tone_tables() -> Result<p1100_job::ToneTables, String> {
+    let dir = match env::var("P1100_TONES") {
         Ok(dir) => PathBuf::from(dir),
         Err(_) => env::current_exe()
             .map_err(|e| format!("cannot find this filter's own path: {e}"))?
@@ -257,24 +258,24 @@ fn load_tone_tables() -> Result<p1102_job::ToneTables, String> {
         let path = dir.join(name);
         let bytes = fs::read(&path).map_err(|e| {
             format!(
-                "p1102Grey=Screened2 needs {}, and reading it failed: {e}. Run \
+                "p1100Grey=Screened2 needs {}, and reading it failed: {e}. Run \
                  'scripts/hp-tone-table.py --out DIR' and install what it writes, or point \
-                 P1102_TONES at it",
+                 P1100_TONES at it",
                 path.display()
             )
         })?;
-        if bytes.len() < p1102_raster::TONE_TABLE_LEN {
+        if bytes.len() < p1100_raster::TONE_TABLE_LEN {
             return Err(format!(
                 "{} is {} bytes; a whole tone table is {}",
                 path.display(),
                 bytes.len(),
-                p1102_raster::TONE_TABLE_LEN
+                p1100_raster::TONE_TABLE_LEN
             ));
         }
         Ok(bytes)
     };
-    Ok(p1102_job::ToneTables {
-        at_400: read("p1102-400.tones")?,
-        at_600: read("p1102-600.tones")?,
+    Ok(p1100_job::ToneTables {
+        at_400: read("p1100-400.tones")?,
+        at_600: read("p1100-600.tones")?,
     })
 }

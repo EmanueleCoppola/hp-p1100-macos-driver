@@ -5,15 +5,15 @@
 //! CUPS, and can later be re-hosted behind an IPP Printer Application without change
 //! (see `docs/architecture.md`).
 
-use p1102_protocol::{
+use p1100_protocol::{
     duplex as zduplex, media, op, paper, pjl_epilogue, pjl_prologue, source, Encoder, Items,
     JobOptions, PageGeometry, PjlSettings, Reserved, JBIG_BID_MAX, JBIG_BIH_LEN,
 };
-use p1102_raster::{
+use p1100_raster::{
     to_mono1, to_two_bit_planes, PageHeader, RasterError, RasterStream, DEFAULT_THRESHOLD,
 };
 
-use p1102_jbig::JbigEncoder;
+use p1100_jbig::JbigEncoder;
 
 use std::io::{Read, Write};
 
@@ -63,7 +63,7 @@ pub struct Options {
     pub econo_mode: bool,
     /// `pjlJamRecovery`: true selects `AUTO`, false `OFF`.
     pub jam_recovery_auto: bool,
-    /// The `p1102Grey` option this repository's PPD offers: `Screened2` asks for the two-bit
+    /// The `p1100Grey` option this repository's PPD offers: `Screened2` asks for the two-bit
     /// screening HP's driver does, `Mono1` (the default) for the one-bit thresholding the
     /// reference driver sends. The tables themselves are the caller's to supply, because only
     /// the filter knows where they are installed.
@@ -105,7 +105,7 @@ impl Default for Options {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
     Raster(RasterError),
-    Jbig(p1102_jbig::JbigError),
+    Jbig(p1100_jbig::JbigError),
     /// Writing the job out failed.
     Io(String),
     /// The raster stream contained no pages.
@@ -120,8 +120,8 @@ impl From<RasterError> for Error {
     }
 }
 
-impl From<p1102_jbig::JbigError> for Error {
-    fn from(e: p1102_jbig::JbigError) -> Self {
+impl From<p1100_jbig::JbigError> for Error {
+    fn from(e: p1100_jbig::JbigError) -> Self {
         Error::Jbig(e)
     }
 }
@@ -269,7 +269,7 @@ fn apply_one_option(opts: &mut Options, key: &str, value: &str) {
         }
         "EconoMode" => opts.econo_mode = is_true(value),
         "pjlJamRecovery" => opts.jam_recovery_auto = is_true(value),
-        "p1102Grey" => opts.screened = value == "Screened2",
+        "p1100Grey" => opts.screened = value == "Screened2",
         _ => {}
     }
 }
@@ -297,7 +297,7 @@ pub fn apply_ppd_defaults(opts: &mut Options, ppd: &str) {
         // resolution - reaches us through the raster page header, which already reflects them.
         if matches!(
             key,
-            "InputSlot" | "Duplex" | "EconoMode" | "pjlDensity" | "pjlJamRecovery" | "p1102Grey"
+            "InputSlot" | "Duplex" | "EconoMode" | "pjlDensity" | "pjlJamRecovery" | "p1100Grey"
         ) {
             apply_one_option(opts, key, value.trim().trim_matches('"'));
         }
@@ -388,9 +388,9 @@ fn write_image(
     let mut jbig = JbigEncoder::with_options(
         header.jbig_width(),
         header.cups_height,
-        p1102_jbig::DEFAULT_L0,
-        p1102_jbig::DEFAULT_ORDER,
-        p1102_jbig::DEFAULT_OPTIONS & !p1102_jbig::OPT_LRLTWO,
+        p1100_jbig::DEFAULT_L0,
+        p1100_jbig::DEFAULT_ORDER,
+        p1100_jbig::DEFAULT_OPTIONS & !p1100_jbig::OPT_LRLTWO,
     )
     .planes(2);
     let bie = jbig.encode_planes(&refs)?;
@@ -514,7 +514,7 @@ pub fn encode_raster_job(raster: &[u8], opts: &Options) -> Result<Vec<u8>, Error
 }
 
 /// Encode a single-page job from an already 1 bpp bitmap, using the stride
-/// [`p1102_raster::to_mono1`] produces for this width.
+/// [`p1100_raster::to_mono1`] produces for this width.
 ///
 /// This is the entry point for generated test pages, which never come from a raster
 /// stream at all, so the whole job pipeline can be exercised without CUPS.
@@ -526,7 +526,7 @@ pub fn encode_bitmap_job(
     paper: u32,
     opts: &Options,
 ) -> Result<Vec<u8>, Error> {
-    let jbig_width = p1102_raster::align128(width);
+    let jbig_width = p1100_raster::align128(width);
     let mut g = PageGeometry::mono(width, height, resolution.max(1));
     g.paper = paper;
     g.duplex = opts.duplex;
@@ -597,7 +597,7 @@ fn set_pixel(bm: &mut [u8], stride: usize, w: i64, h: i64, x: i64, y: i64) {
 
 /// Render a pattern as a 1 bpp bitmap with stride `align128(width) / 8`, set bit = ink.
 pub fn test_page_bitmap(pattern: TestPattern, width: u32, height: u32) -> Vec<u8> {
-    let stride = (p1102_raster::align128(width) / 8) as usize;
+    let stride = (p1100_raster::align128(width) / 8) as usize;
     let mut bm = vec![0u8; stride * height as usize];
     let (w, h) = (width as i64, height as i64);
 
@@ -788,8 +788,8 @@ mod timestamp_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use p1102_protocol::{decode, op as pop, op_name, strip_pjl_framing, STREAM_SIGNATURE};
-    use p1102_raster::{encode_page_header, SYNC_RASTER3};
+    use p1100_protocol::{decode, op as pop, op_name, strip_pjl_framing, STREAM_SIGNATURE};
+    use p1100_raster::{encode_page_header, SYNC_RASTER3};
 
     fn mono_header(width: u32, height: u32, name: &str) -> PageHeader {
         PageHeader {
@@ -861,8 +861,8 @@ mod tests {
         let header = mono_header(w, h, "Letter");
         let mut px = vec![255u8; (w * h) as usize];
         px[0] = 0;
-        let mono = p1102_raster::to_mono1(&header, &px, p1102_raster::DEFAULT_THRESHOLD).unwrap();
-        let mut jbig = JbigEncoder::new(p1102_raster::align128(w), h);
+        let mono = p1100_raster::to_mono1(&header, &px, p1100_raster::DEFAULT_THRESHOLD).unwrap();
+        let mut jbig = JbigEncoder::new(p1100_raster::align128(w), h);
         let expected = jbig.encode(&mono).unwrap();
 
         // The last BID chunk is padded so the chunk ends on a 4-byte boundary.
@@ -876,7 +876,7 @@ mod tests {
     fn raster_stride_matches_the_jbig_line_length() {
         for w in [1u32, 7, 8, 63, 64, 4900, 4992, 5000] {
             let header = mono_header(w, 4, "Letter");
-            let jbig = JbigEncoder::new(p1102_raster::align128(w), 4);
+            let jbig = JbigEncoder::new(p1100_raster::align128(w), 4);
             assert_eq!(
                 header.mono_row_bytes(),
                 jbig.bytes_per_line(),
@@ -981,13 +981,13 @@ mod tests {
             .iter()
             .find(|c| c.header.ty == pop::START_PAGE)
             .unwrap();
-        assert_eq!(item_value(&page.items, p1102_protocol::item::ECONOMODE), 1);
+        assert_eq!(item_value(&page.items, p1100_protocol::item::ECONOMODE), 1);
         assert_eq!(
-            item_value(&page.items, p1102_protocol::item::DMDUPLEX),
+            item_value(&page.items, p1100_protocol::item::DMDUPLEX),
             zduplex::LONG_EDGE
         );
         assert_eq!(
-            item_value(&page.items, p1102_protocol::item::DMDEFAULTSOURCE),
+            item_value(&page.items, p1100_protocol::item::DMDEFAULTSOURCE),
             source::MANUAL
         );
         // duplexing also puts DMDUPLEX on the page-end chunk
@@ -996,14 +996,14 @@ mod tests {
             .find(|c| c.header.ty == pop::END_PAGE)
             .unwrap();
         assert_eq!(
-            item_value(&end_page.items, p1102_protocol::item::DMDUPLEX),
+            item_value(&end_page.items, p1100_protocol::item::DMDUPLEX),
             zduplex::LONG_EDGE
         );
     }
 
     // ---------------------------------------------------------------- test pages
 
-    fn item_value(items: &[p1102_protocol::DecodedItem], tag: u16) -> u32 {
+    fn item_value(items: &[p1100_protocol::DecodedItem], tag: u16) -> u32 {
         let it = items.iter().find(|i| i.item == tag).expect("item present");
         u32::from_be_bytes([it.payload[0], it.payload[1], it.payload[2], it.payload[3]])
     }
@@ -1017,7 +1017,7 @@ mod tests {
     }
 
     fn stride_for(width: u32) -> usize {
-        (p1102_raster::align128(width) / 8) as usize
+        (p1100_raster::align128(width) / 8) as usize
     }
 
     #[test]
@@ -1130,23 +1130,23 @@ mod tests {
         );
         // RASTER_X and VIDEO_X keep the true width; only the JBIG image is aligned up
         assert_eq!(
-            item_value(&chunks[1].items, p1102_protocol::item::RASTER_X),
+            item_value(&chunks[1].items, p1100_protocol::item::RASTER_X),
             1300
         );
         assert_eq!(
-            item_value(&chunks[1].items, p1102_protocol::item::VIDEO_X),
+            item_value(&chunks[1].items, p1100_protocol::item::VIDEO_X),
             1300
         );
         assert_eq!(
-            item_value(&chunks[1].items, p1102_protocol::item::RASTER_Y),
+            item_value(&chunks[1].items, p1100_protocol::item::RASTER_Y),
             1300
         );
         assert_eq!(
-            item_value(&chunks[1].items, p1102_protocol::item::RESOLUTION_X),
+            item_value(&chunks[1].items, p1100_protocol::item::RESOLUTION_X),
             600
         );
         assert_eq!(
-            item_value(&chunks[1].items, p1102_protocol::item::DMPAPER),
+            item_value(&chunks[1].items, p1100_protocol::item::DMPAPER),
             paper::LETTER
         );
         // the BIH announces the aligned width
@@ -1159,7 +1159,7 @@ mod tests {
                 assembled.extend_from_slice(&c.payload);
             }
         }
-        let mut jbig = JbigEncoder::new(p1102_raster::align128(1300), 1300);
+        let mut jbig = JbigEncoder::new(p1100_raster::align128(1300), 1300);
         let expected = jbig.encode(&bm).unwrap();
         assert_eq!(&assembled[..expected.len()], expected.as_slice());
     }
@@ -1203,7 +1203,7 @@ mod tests {
         let r = raster(&[(8, 2, "Letter"), (16, 4, "A4"), (8, 2, "B5JIS")]);
         let job = encode_raster_job(&r, &Options::default()).unwrap();
         let chunks = decode(zjs_body(&job)).unwrap();
-        let pages: Vec<&Vec<p1102_protocol::DecodedItem>> = chunks
+        let pages: Vec<&Vec<p1100_protocol::DecodedItem>> = chunks
             .iter()
             .filter(|c| c.header.ty == pop::START_PAGE)
             .map(|c| &c.items)
@@ -1211,7 +1211,7 @@ mod tests {
         assert_eq!(pages.len(), 3);
         let codes: Vec<u32> = pages
             .iter()
-            .map(|items| item_value(items, p1102_protocol::item::DMPAPER))
+            .map(|items| item_value(items, p1100_protocol::item::DMPAPER))
             .collect();
         assert_eq!(
             codes,
@@ -1221,12 +1221,12 @@ mod tests {
         // The raster dimensions follow the same per-page header.
         let widths: Vec<u32> = pages
             .iter()
-            .map(|items| item_value(items, p1102_protocol::item::RASTER_X))
+            .map(|items| item_value(items, p1100_protocol::item::RASTER_X))
             .collect();
         assert_eq!(widths, vec![8, 16, 8]);
         let heights: Vec<u32> = pages
             .iter()
-            .map(|items| item_value(items, p1102_protocol::item::RASTER_Y))
+            .map(|items| item_value(items, p1100_protocol::item::RASTER_Y))
             .collect();
         assert_eq!(heights, vec![2, 4, 2]);
     }
@@ -1380,7 +1380,7 @@ mod tests {
         let dmpaper = page
             .items
             .iter()
-            .find(|i| i.item == p1102_protocol::item::DMPAPER)
+            .find(|i| i.item == p1100_protocol::item::DMPAPER)
             .unwrap();
         assert_eq!(
             u32::from_be_bytes([
@@ -1446,8 +1446,8 @@ mod tests {
 #[cfg(test)]
 mod tone_table_tests {
     use super::*;
-    use p1102_protocol::{decode, strip_pjl_framing, STREAM_SIGNATURE};
-    use p1102_raster::{encode_page_header, PageHeader, SYNC_RASTER3};
+    use p1100_protocol::{decode, strip_pjl_framing, STREAM_SIGNATURE};
+    use p1100_raster::{encode_page_header, PageHeader, SYNC_RASTER3};
 
     fn header(width: u32, height: u32, compression: u32) -> PageHeader {
         PageHeader {
@@ -1467,7 +1467,7 @@ mod tone_table_tests {
     }
 
     fn table(level: u8) -> Vec<u8> {
-        let mut t = vec![0u8; p1102_raster::TONE_TABLE_LEN];
+        let mut t = vec![0u8; p1100_raster::TONE_TABLE_LEN];
         for byte in t.iter_mut() {
             *byte = level * 0x55;
         }
@@ -1533,14 +1533,14 @@ mod screened_option_tests {
         let mut opts = Options::default();
         assert!(!opts.screened, "one bit is the default");
 
-        apply_ppd_options(&mut opts, "p1102Grey=Screened2");
+        apply_ppd_options(&mut opts, "p1100Grey=Screened2");
         assert!(opts.screened);
 
-        apply_ppd_options(&mut opts, "p1102Grey=Mono1");
+        apply_ppd_options(&mut opts, "p1100Grey=Mono1");
         assert!(!opts.screened);
 
         let mut opts = Options::default();
-        apply_ppd_defaults(&mut opts, "*Defaultp1102Grey: Screened2\n");
+        apply_ppd_defaults(&mut opts, "*Defaultp1100Grey: Screened2\n");
         assert!(opts.screened);
     }
 }
