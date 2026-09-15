@@ -434,6 +434,8 @@ DEV=$(lpstat -v HP_LaserJet_Professional_P1102 | sed -n 's/^device for [^:]*: //
 DEVICE_URI="$DEV" /usr/libexec/cups/backend/usb 1 "$USER" bring-up 1 '' /tmp/square.zjs
 ```
 
+The same job in one command, reading the device URI from the queue unless `--device` says otherwise, and with a limit so it cannot sit there retrying: `p1102 send /tmp/square.zjs` gives up after `--timeout` seconds (60 by default).
+
 The backend line is the same transport a queue would use. A CUPS backend takes its device
 URI from `argv[0]` - or, as here, from `DEVICE_URI` - and reads the job from the file argument
 or stdin, all documented in backend(7), and Apple's `usb` backend is world-executable, so
