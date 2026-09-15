@@ -57,6 +57,46 @@ run() {
 
 die() { echo "error: $*" >&2; exit 1; }
 
+# --- validating a generated PPD ---------------------------------------------
+
+# Two things CUPS itself cannot do here, both checked rather than assumed: macOS ships no
+# cupstestppd, and cupsfilter falls back to its built-in conversion rules when a PPD declares
+# nothing useful, so it produces a raster even from a deliberately empty PPD. So the property
+# checked is the one the documentation actually claims about this file: it differs from the
+# source PPD in exactly the intended ways, and in no other way at all. That is what would
+# catch a generator regression that mangled the device data.
+check_ppd() {
+    ppd=$1
+    [ -s "$ppd" ] || die "the generated PPD is empty"
+
+    grep -q "^\*cupsFilter: \"application/vnd.cups-raster 100 $DEST/p1102-filter\"" "$ppd" \
+        || die "the generated PPD does not point its raster filter at $DEST/p1102-filter"
+    # Only filter lines matter here: *APPrinterIconPath still points at HP's icon on purpose,
+    # so that the queue keeps a printer icon; that is a picture, not a program.
+    grep -E '^\*cupsFilter:.*(hpRaster\.bundle|/Library/Printers/hp)' "$ppd" \
+        && die "the generated PPD still routes a filter into HP's installation"
+    for gone in '^\*cupsCommands' '^\*APPrinterUtilityPath' '^\*cupsFilter: "application/vnd.cups-command'; do
+        grep -q "$gone" "$ppd" && die "the generated PPD still carries a line matching $gone"
+    done
+
+    # Compare against the source. Only these line kinds may differ; anything else is a bug in
+    # the generator, not a cosmetic difference.
+    probe=$(mktemp -t p1102-ppd-source) || die "cannot create a temporary file"
+    case "$SRC_PPD" in
+        *.gz) gzcat "$SRC_PPD" > "$probe" || die "cannot decompress $SRC_PPD" ;;
+        *)    cp "$SRC_PPD" "$probe" || die "cannot read $SRC_PPD" ;;
+    esac
+    unexpected=$(diff "$probe" "$ppd" 2>/dev/null | grep -E '^[<>]' | grep -vE \
+        '^[<>] \*(%%|NickName|[a-zA-Z_@-]+\.Translation NickName/|cupsFilter: "application/vnd\.cups-(raster|command)|cupsCommands|APPrinterUtilityPath)' \
+        | grep -vE '^[<>] *$' || true)
+    rm -f "$probe"
+    if [ -n "$unexpected" ]; then
+        echo "$unexpected" >&2
+        die "the generated PPD changes lines it should not (above)"
+    fi
+    echo "   PPD checks out: only the driver wiring lines differ from $SRC_PPD"
+}
+
 # --- safety rails -----------------------------------------------------------
 
 case "$DEST" in
@@ -122,7 +162,21 @@ echo
 echo "1. installing the filter and PPD into $DEST"
 run mkdir -p "$DEST"
 run /usr/bin/install -m 0755 -o root -g wheel "$FILTER" "$DEST/p1102-filter"
-run "$PYTHON" "$REPO/scripts/make-ppd.py" "$SRC_PPD" "$DEST/p1102-filter" "$DEST/p1102.ppd"
+if [ "$DRY" = 1 ]; then
+    # Generate the PPD somewhere harmless and check it, so a dry run says something about
+    # the artifact as well as about the commands.
+    if [ "$PYTHON_OK" = 1 ]; then
+        probe_ppd=$(mktemp -t p1102-ppd-check.ppd) || die "cannot create a temporary file"
+        "$PYTHON" "$REPO/scripts/make-ppd.py" "$SRC_PPD" "$DEST/p1102-filter" "$probe_ppd" \
+            || die "PPD generation failed"
+        check_ppd "$probe_ppd"
+        rm -f "$probe_ppd"
+    fi
+else
+    run "$PYTHON" "$REPO/scripts/make-ppd.py" "$SRC_PPD" "$DEST/p1102-filter" "$DEST/p1102.ppd"
+    # Before the queue is created, not after: a PPD CUPS cannot use must not reach lpadmin.
+    check_ppd "$DEST/p1102.ppd"
+fi
 
 echo
 echo "2. creating the queue '$QUEUE'"

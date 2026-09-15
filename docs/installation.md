@@ -59,6 +59,10 @@ scripts/make-ppd.py reads the installed PPD and changes only the driver wiring:
 Everything else is byte-for-byte the same file. You can see the exact diff before
 installing anything - the script only reads, and writes a new file:
 
+One line that is deliberately *not* changed is `*APPrinterIconPath`, which points at HP's
+`hp1100.icns`: it is a picture, so the new queue keeps a printer icon rather than none. The
+distinction that matters is filter wiring, and no filter line may point into HP's tree.
+
     PYTHON=/opt/homebrew/bin/python3.13
     $PYTHON scripts/make-ppd.py \
         /etc/cups/ppd/HP_LaserJet_Professional_P1102.ppd \
@@ -78,6 +82,15 @@ obscurely.
 Review the plan first, which needs no privileges and prints every command it would run:
 
     ./scripts/install.sh --dry-run
+
+The dry run also generates the PPD into a temporary file and checks it, so it tells you
+something about the artifact rather than only about the commands. CUPS's own PPD validator
+is not available to do that job - macOS ships no `cupstestppd`, and `cupsfilter` falls back to
+its built-in conversion rules when a PPD declares nothing, so it happily produces a raster
+from an empty PPD. The check is therefore the property this document claims about the file:
+that it differs from the source in exactly the listed ways and in no others. A real install
+runs the same check before creating the queue, so a PPD CUPS could not use never reaches
+`lpadmin`.
 
 Options:
 
