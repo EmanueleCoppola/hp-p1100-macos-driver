@@ -97,9 +97,9 @@ CoreFoundation.
 | backend/usb | libcups.2, IOKit, SystemConfiguration, Security, libresolv.9, libiconv.2, libz.1 |
 | HP rastertozjs | **libcups.2, libcupsimage.2, libstdc++.6**, Foundation, Accelerate, libobjc |
 | HP usbink | libcups.2, IOKit, AppKit, Foundation, libobjc |
-| our p1005-filter | none of the above: the Rust standard library and the system libs it pulls in |
+| our p1005-filter | **only `/usr/lib/libSystem.B.dylib`** |
 
-Two things this table shows that are worth stating plainly.
+Three things this table shows that are worth stating plainly.
 
 **Every component links libcups except ours.** That is deliberate, but it is a choice about
 independence rather than a necessity - see docs/architecture.md, which records the earlier
@@ -107,6 +107,11 @@ and wrong claim that libcups was missing.
 
 **Only the HP filters need libstdc++.6.dylib**, which is the one library in this list that is
 not on disk. Combined with their x86_64-only architecture, they cannot run here.
+
+**Ours links one library.** Read with the same tool as the rest of this table, both of our
+binaries load only `/usr/lib/libSystem.B.dylib` - no libcups, no frameworks, no private
+frameworks, no rpaths. That is the evidence for the claim that the replacement minimises its
+reliance on the platform: the entire dependency surface is the C library.
 
 ### Census of the whole installation (CONFIRMED)
 

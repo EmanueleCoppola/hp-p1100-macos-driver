@@ -23,6 +23,20 @@ Not linking `libcups` is still the right decision, for a weaker and more durable
 filter then depends on nothing but the raster stream and the Rust standard library, so a CUPS
 ABI or path change cannot break it, and it compiles without CUPS headers. That is
 independence rather than necessity, and it is worth stating as such.
+Measured, not assumed: both of our binaries load exactly one library,
+
+    /usr/lib/libSystem.B.dylib
+
+with no libcups, no frameworks, no private frameworks and no rpaths. HP's filter loads four
+(libcups, libcupsimage, libstdc++.6 and libSystem). The entire dependency surface of the
+replacement is the C library, which is what makes it hard for a macOS release to break it.
+
+One cosmetic artefact of building through the rust-lld fallback rather than Apple's toolchain:
+the recorded SDK version in the load command comes out as 11.0.0 rather than the real SDK,
+because rustc cannot ask xcrun for the SDK path while the licence is unaccepted. It is
+informational and does not affect the linked behaviour - the minimum OS is 11.0 either way.
+
+
 
 ## Options considered
 
