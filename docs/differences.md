@@ -225,6 +225,21 @@ documents as the horizontal pixel alignment.
 - The 1284 device ID, the USB device path and the queue's device URI are inherited rather
   than re-derived.
 
+## 10. The media source default, when CUPS passes no `InputSlot`. LIKELY harmless
+
+Three defaults disagree, and all three are defensible on a printer with one tray: ours is 1
+("only one"), the reference driver's is 7 (auto), and the PPD's own default - which HP's
+filter reads out of the PPD with `ppdMarkDefaults` and `ppdFindMarkedChoice`, both visible in
+its imports - is `*DefaultInputSlot: Manual`, i.e. 4.
+
+What makes this mostly theoretical is that CUPS passes the PPD's choice to the filter in
+argv[5], and then all three agree on the same item. The difference shows only if cupsd passes
+no `InputSlot` at all, and that could not be observed on this machine: cupsd cannot be run
+here (its binary is mode 0500 root:wheel) and no job history is retained, so there is nothing
+to read the real option string from. It matters for one hardware symptom, which is why it is
+recorded: **a job that prints the first page and then waits for paper would point at 4**, and
+the thing to try next is an explicit `InputSlot` choice rather than the default.
+
 ## What settles the unverified items
 
 Each one maps to an observation the hardware test makes:
@@ -236,6 +251,7 @@ Each one maps to an observation the hardware test makes:
 | 4, command path | absent supplies reporting is visible in the print dialog, not in printing |
 | 5, duplex | send a three-page job with `Duplex=DuplexNoTumble`: the printer should prompt to flip the stack ("press the Go button"), and two-sided output means our item-only approach is right; single-sided sheets in document order with no prompt means it needs the host-side handling both other drivers have |
 | 6, media codes | whether a non-plain-paper job prints correctly, or jams or misfeeds |
+| 10, media source | a job that prints one page and then waits for paper: try an explicit `InputSlot` rather than the default |
 
 Everything else that used to be listed as uncertain - the wrapper text, the item sets and
 their order, the page geometry, the JBIG configuration, the compressed image, the chunk
