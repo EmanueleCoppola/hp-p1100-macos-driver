@@ -78,7 +78,9 @@ fn main() -> ExitCode {
                 return fail(&format!("writing the job to stdout: {e}"));
             }
             eprintln!(
-                "p1102-filter: encoded {pages} page(s), {} bytes (pjl={}, encoding={:?})",
+                // INFO rather than DEBUG: this becomes the queue's last state message, so a
+                // successful job leaves a trace of what the filter did with it
+                "INFO: encoded {pages} page(s), {} bytes (pjl={}, encoding={:?})",
                 out.bytes, opts.pjl, opts.encoding
             );
             ExitCode::SUCCESS
@@ -88,7 +90,10 @@ fn main() -> ExitCode {
 }
 
 fn fail(message: &str) -> ExitCode {
-    eprintln!("p1102-filter: ERROR: {message}");
+    // CUPS classifies a filter's stderr by its first word: "ERROR: ..." sets
+    // printer-state-message and logs at error level, where a line prefixed with the program
+    // name is merely stored as text. So the prefix goes first, as Apple's own filters do.
+    eprintln!("ERROR: {message}");
     ExitCode::from(1)
 }
 
@@ -134,7 +139,7 @@ fn build_options(options: &str) -> Options {
         match fs::read_to_string(&path) {
             Ok(text) => p1102_job::apply_ppd_defaults(&mut opts, &text),
             Err(e) => {
-                eprintln!("p1102-filter: cannot read PPD {path}: {e}; using built-in defaults")
+                eprintln!("WARNING: cannot read PPD {path}: {e}; using built-in defaults")
             }
         }
     }
