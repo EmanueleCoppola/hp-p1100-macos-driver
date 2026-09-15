@@ -41,6 +41,7 @@ ORIENTATION = 344
 PAGE_SIZE = 352
 CUPS_WIDTH = 372
 CUPS_HEIGHT = 376
+CUPS_MEDIA_TYPE = 380
 CUPS_BITS_PER_COLOR = 384
 CUPS_BITS_PER_PIXEL = 388
 CUPS_BYTES_PER_LINE = 392
@@ -91,6 +92,7 @@ def parse_header(d, o):
         'page_size': (f32(d, o + CUPS_PAGE_SIZE), f32(d, o + CUPS_PAGE_SIZE + 4)),
         'bbox': tuple(f32(d, o + CUPS_IMAGING_BBOX + 4 * i) for i in range(4)),
         'media_type': cstr(d, o + MEDIA_TYPE, 64),
+        'cups_media_type': u32(d, o + CUPS_MEDIA_TYPE),
         'page_size_name': cstr(d, o + CUPS_PAGE_SIZE_NAME, 64),
     }
 
@@ -143,8 +145,8 @@ def dump(path, maxpages):
               % (h['width'], h['height'], h['bits_per_color'], h['bits_per_pixel'],
                  h['bytes_per_line'], h['num_colors']))
         print('      payload %d bytes (= %d * %d)' % (payload, h['bytes_per_line'], h['height']))
-        print('      media type %r, size name %r, page size %s pt, bbox %s, borderless %g'
-              % (h['media_type'], h['page_size_name'],
+        print('      media type %r, cupsMediaType %d, size name %r, page size %s pt, bbox %s, borderless %g'
+              % (h['media_type'], h['cups_media_type'], h['page_size_name'],
                  tuple(round(v, 2) for v in h['page_size']),
                  tuple(round(v, 2) for v in h['bbox']), h['borderless']))
         print('      resolution %s dpi, margins %s pt, copies %d, compression %s'

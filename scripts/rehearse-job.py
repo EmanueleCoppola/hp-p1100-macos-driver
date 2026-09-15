@@ -201,6 +201,73 @@ def check_levers(raster_path, options, work, zc):
     return lines
 
 
+def ppd_media_type_codes(path):
+    """The MediaType choices a PPD declares, and the cupsMediaType code each one sets."""
+    codes = {}
+    with open(path, encoding='latin1') as f:
+        for line in f:
+            if not line.startswith('*MediaType '):
+                continue
+            head, _, value = line.partition(':')
+            choice = head.split(' ')[1].split('/')[0]
+            _, _, after = value.partition('cupsMediaType')
+            digits = ''
+            for ch in after.lstrip():
+                if not ch.isdigit():
+                    break
+                digits += ch
+            if choice and digits:
+                codes[choice] = int(digits)
+    return codes
+
+
+def check_media_types(raster_path, work, cr, zc):
+    """Every MediaType this PPD declares arrives as the code the file declares.
+
+    The code travels PPD -> PostScript page device -> raster header (cupsMediaType) ->
+    ZJI_DMMEDIATYPE. scripts/reference-compare.py checks the whole path against the reference
+    driver for three choices; this checks the header-to-item step for all of them, by patching
+    the code into a small page cut out of the real raster so that the sweep costs nothing.
+    """
+    if not os.path.exists(PPD):
+        return []
+    codes = ppd_media_type_codes(PPD)
+    if not codes:
+        raise Lever('the PPD declares no MediaType choices, so the sweep would prove nothing')
+
+    base = open(raster_path, 'rb').read()
+    off = next(cr.walk(base))[1]
+    width, height = 128, 8
+    page = bytearray(base[:off + cr.PAGE_HEADER_LEN + width * height])
+    struct.pack_into('<II', page, off + cr.CUPS_WIDTH, width, height)
+    struct.pack_into('<I', page, off + cr.CUPS_BYTES_PER_LINE, width)
+
+    for choice in sorted(codes, key=lambda c: codes[c]):
+        value = codes[choice]
+        data = bytearray(page)
+        struct.pack_into('<I', data, off + cr.CUPS_MEDIA_TYPE, value)
+        raster = os.path.join(work, 'media-%d.raster' % value)
+        with open(raster, 'wb') as f:
+            f.write(bytes(data))
+        out = os.path.join(work, 'media-%d.zjs' % value)
+        code, stderr, _ = run_filter(raster, '', out)
+        if code != 0:
+            raise Lever('the filter exited %d on MediaType %s (code %d): %s'
+                        % (code, choice, value, stderr))
+        items = {}
+        for kind, event in zc.semantic_view(open(out, 'rb').read())['events']:
+            if kind == 'chunk' and event['op'] == 'START_PAGE':
+                items = event['items']
+                break
+        got = str(items.get('DMMEDIATYPE')).split()[0]
+        if got != str(value):
+            raise Lever('MediaType %s should reach the printer as %s, the job says %r'
+                        % (choice, value, items.get('DMMEDIATYPE')))
+    return ['all %d MediaType choices in the installed PPD arrive as the code it declares: %s'
+            % (len(codes), ' '.join('%d=%s' % (codes[c], c)
+                                    for c in sorted(codes, key=lambda c: codes[c])))]
+
+
 def run_filter(raster_path, options, out_path, raw=False, env_overrides=None):
     overrides = {'P1102_RAW': '1'} if raw else {}
     if env_overrides:
@@ -410,6 +477,14 @@ def main(argv):
     print('  6. bring-up levers, the overrides the hardware notes tell you to reach for:')
     try:
         for line in check_levers(raster_path, args.options, work, zc):
+            print('       %s' % line)
+    except Lever as exc:
+        return fail(str(exc))
+
+    print()
+    print('  7. media type codes, every choice the installed PPD declares:')
+    try:
+        for line in check_media_types(raster_path, work, cr, zc):
             print('       %s' % line)
     except Lever as exc:
         return fail(str(exc))
