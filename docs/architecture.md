@@ -156,7 +156,7 @@ template movement); the parameters and their provenance are in `docs/jbig.md`.
 
 **Neither is the wrapper.** The job our filter writes - PJL wrapper, chunk sequence, item
 sets and their order, geometry, compressed image and final-chunk padding - is byte-identical
-to the reference driver's for the same page and options, across fourteen cases: print
+to the reference driver's for the same page and options, across twenty-five cases: print
 options including a two-page job, both resolutions the PPD offers, and every page size it
 declares. The comparison is `scripts/reference-compare.py`, and what it cannot cover is
 listed in `docs/differences.md`.
