@@ -165,7 +165,7 @@ fn zjs_dump(args: &[String]) -> Result<(), String> {
     if framed {
         println!("PJL framing present; decoding the ZjStream body only");
     }
-    let chunks = decode(data).map_err(|e| format!("{e:?}"))?;
+    let chunks = decode(data).map_err(|e| format!("{e}"))?;
     let mut total_items = 0usize;
     let mut payload = 0usize;
     for (i, c) in chunks.iter().enumerate() {
