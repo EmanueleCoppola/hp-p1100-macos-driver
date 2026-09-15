@@ -5,13 +5,13 @@
 //! CUPS, and can later be re-hosted behind an IPP Printer Application without change
 //! (see `docs/architecture.md`).
 
-use p1005_protocol::{
+use p1102_protocol::{
     duplex as zduplex, media, op, paper, pjl_epilogue, pjl_prologue, source, Encoder, Items,
     JobOptions, PageGeometry, PjlSettings, Reserved, JBIG_BID_MAX, JBIG_BIH_LEN,
 };
-use p1005_raster::{to_mono1, PageHeader, RasterError, RasterStream, DEFAULT_THRESHOLD};
+use p1102_raster::{to_mono1, PageHeader, RasterError, RasterStream, DEFAULT_THRESHOLD};
 
-use p1005_jbig::JbigEncoder;
+use p1102_jbig::JbigEncoder;
 
 use std::io::{Read, Write};
 
@@ -69,7 +69,7 @@ impl Default for Options {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
     Raster(RasterError),
-    Jbig(p1005_jbig::JbigError),
+    Jbig(p1102_jbig::JbigError),
     /// Writing the job out failed.
     Io(String),
     /// The raster stream contained no pages.
@@ -82,8 +82,8 @@ impl From<RasterError> for Error {
     }
 }
 
-impl From<p1005_jbig::JbigError> for Error {
-    fn from(e: p1005_jbig::JbigError) -> Self {
+impl From<p1102_jbig::JbigError> for Error {
+    fn from(e: p1102_jbig::JbigError) -> Self {
         Error::Jbig(e)
     }
 }
@@ -366,7 +366,7 @@ pub fn encode_raster_job(raster: &[u8], opts: &Options) -> Result<Vec<u8>, Error
 }
 
 /// Encode a single-page job from an already 1 bpp bitmap, using the stride
-/// [`p1005_raster::to_mono1`] produces for this width.
+/// [`p1102_raster::to_mono1`] produces for this width.
 ///
 /// This is the entry point for generated test pages, which never come from a raster
 /// stream at all, so the whole job pipeline can be exercised without CUPS.
@@ -378,7 +378,7 @@ pub fn encode_bitmap_job(
     paper: u32,
     opts: &Options,
 ) -> Result<Vec<u8>, Error> {
-    let jbig_width = p1005_raster::align128(width);
+    let jbig_width = p1102_raster::align128(width);
     let mut g = PageGeometry::mono(width, height, resolution.max(1));
     g.paper = paper;
     g.duplex = opts.duplex;
@@ -449,7 +449,7 @@ fn set_pixel(bm: &mut [u8], stride: usize, w: i64, h: i64, x: i64, y: i64) {
 
 /// Render a pattern as a 1 bpp bitmap with stride `align128(width) / 8`, set bit = ink.
 pub fn test_page_bitmap(pattern: TestPattern, width: u32, height: u32) -> Vec<u8> {
-    let stride = (p1005_raster::align128(width) / 8) as usize;
+    let stride = (p1102_raster::align128(width) / 8) as usize;
     let mut bm = vec![0u8; stride * height as usize];
     let (w, h) = (width as i64, height as i64);
 
@@ -640,8 +640,8 @@ mod timestamp_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use p1005_protocol::{decode, op as pop, op_name, strip_pjl_framing, STREAM_SIGNATURE};
-    use p1005_raster::{color_space, compression, encode_page_header, SYNC_RASTER3};
+    use p1102_protocol::{decode, op as pop, op_name, strip_pjl_framing, STREAM_SIGNATURE};
+    use p1102_raster::{color_space, compression, encode_page_header, SYNC_RASTER3};
 
     fn mono_header(width: u32, height: u32, name: &str) -> PageHeader {
         PageHeader {
@@ -738,8 +738,8 @@ mod tests {
         let header = mono_header(w, h, "Letter");
         let mut px = vec![255u8; (w * h) as usize];
         px[0] = 0;
-        let mono = p1005_raster::to_mono1(&header, &px, p1005_raster::DEFAULT_THRESHOLD).unwrap();
-        let mut jbig = JbigEncoder::new(p1005_raster::align128(w), h);
+        let mono = p1102_raster::to_mono1(&header, &px, p1102_raster::DEFAULT_THRESHOLD).unwrap();
+        let mut jbig = JbigEncoder::new(p1102_raster::align128(w), h);
         let expected = jbig.encode(&mono).unwrap();
 
         // The last BID chunk is padded so the chunk ends on a 4-byte boundary.
@@ -753,7 +753,7 @@ mod tests {
     fn raster_stride_matches_the_jbig_line_length() {
         for w in [1u32, 7, 8, 63, 64, 4900, 4992, 5000] {
             let header = mono_header(w, 4, "Letter");
-            let jbig = JbigEncoder::new(p1005_raster::align128(w), 4);
+            let jbig = JbigEncoder::new(p1102_raster::align128(w), 4);
             assert_eq!(
                 header.mono_row_bytes(),
                 jbig.bytes_per_line(),
@@ -858,13 +858,13 @@ mod tests {
             .iter()
             .find(|c| c.header.ty == pop::START_PAGE)
             .unwrap();
-        assert_eq!(item_value(&page.items, p1005_protocol::item::ECONOMODE), 1);
+        assert_eq!(item_value(&page.items, p1102_protocol::item::ECONOMODE), 1);
         assert_eq!(
-            item_value(&page.items, p1005_protocol::item::DMDUPLEX),
+            item_value(&page.items, p1102_protocol::item::DMDUPLEX),
             zduplex::LONG_EDGE
         );
         assert_eq!(
-            item_value(&page.items, p1005_protocol::item::DMDEFAULTSOURCE),
+            item_value(&page.items, p1102_protocol::item::DMDEFAULTSOURCE),
             source::MANUAL
         );
         // duplexing also puts DMDUPLEX on the page-end chunk
@@ -873,14 +873,14 @@ mod tests {
             .find(|c| c.header.ty == pop::END_PAGE)
             .unwrap();
         assert_eq!(
-            item_value(&end_page.items, p1005_protocol::item::DMDUPLEX),
+            item_value(&end_page.items, p1102_protocol::item::DMDUPLEX),
             zduplex::LONG_EDGE
         );
     }
 
     // ---------------------------------------------------------------- test pages
 
-    fn item_value(items: &[p1005_protocol::DecodedItem], tag: u16) -> u32 {
+    fn item_value(items: &[p1102_protocol::DecodedItem], tag: u16) -> u32 {
         let it = items.iter().find(|i| i.item == tag).expect("item present");
         u32::from_be_bytes([it.payload[0], it.payload[1], it.payload[2], it.payload[3]])
     }
@@ -894,7 +894,7 @@ mod tests {
     }
 
     fn stride_for(width: u32) -> usize {
-        (p1005_raster::align128(width) / 8) as usize
+        (p1102_raster::align128(width) / 8) as usize
     }
 
     #[test]
@@ -1007,23 +1007,23 @@ mod tests {
         );
         // RASTER_X and VIDEO_X keep the true width; only the JBIG image is aligned up
         assert_eq!(
-            item_value(&chunks[1].items, p1005_protocol::item::RASTER_X),
+            item_value(&chunks[1].items, p1102_protocol::item::RASTER_X),
             1300
         );
         assert_eq!(
-            item_value(&chunks[1].items, p1005_protocol::item::VIDEO_X),
+            item_value(&chunks[1].items, p1102_protocol::item::VIDEO_X),
             1300
         );
         assert_eq!(
-            item_value(&chunks[1].items, p1005_protocol::item::RASTER_Y),
+            item_value(&chunks[1].items, p1102_protocol::item::RASTER_Y),
             1300
         );
         assert_eq!(
-            item_value(&chunks[1].items, p1005_protocol::item::RESOLUTION_X),
+            item_value(&chunks[1].items, p1102_protocol::item::RESOLUTION_X),
             600
         );
         assert_eq!(
-            item_value(&chunks[1].items, p1005_protocol::item::DMPAPER),
+            item_value(&chunks[1].items, p1102_protocol::item::DMPAPER),
             paper::LETTER
         );
         // the BIH announces the aligned width
@@ -1036,7 +1036,7 @@ mod tests {
                 assembled.extend_from_slice(&c.payload);
             }
         }
-        let mut jbig = JbigEncoder::new(p1005_raster::align128(1300), 1300);
+        let mut jbig = JbigEncoder::new(p1102_raster::align128(1300), 1300);
         let expected = jbig.encode(&bm).unwrap();
         assert_eq!(&assembled[..expected.len()], expected.as_slice());
     }
@@ -1137,7 +1137,7 @@ mod tests {
         let dmpaper = page
             .items
             .iter()
-            .find(|i| i.item == p1005_protocol::item::DMPAPER)
+            .find(|i| i.item == p1102_protocol::item::DMPAPER)
             .unwrap();
         assert_eq!(
             u32::from_be_bytes([

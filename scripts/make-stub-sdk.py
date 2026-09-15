@@ -22,7 +22,7 @@ This exists so the project can still be built and verified without it - see docs
 Usage:
   scripts/make-stub-sdk.py [--out DIR] [--sdk DIR] [--quiet]
 
-Defaults: --out ~/.cache/p1005-stub-sdk, --sdk /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
+Defaults: --out ~/.cache/p1102-stub-sdk, --sdk /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
 """
 
 import argparse
@@ -32,7 +32,7 @@ import shutil
 import sys
 
 DEFAULT_SDK = '/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk'
-DEFAULT_OUT = os.path.expanduser('~/.cache/p1005-stub-sdk')
+DEFAULT_OUT = os.path.expanduser('~/.cache/p1102-stub-sdk')
 
 # The token that breaks rust-lld, and any list of targets it appears in.
 BAD_TOKEN = 'arm64e.x1-'

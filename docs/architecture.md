@@ -92,13 +92,13 @@ invoked, move the same library behind an IPP Printer Application.
 ## Shape of the code
 
 ```text
-crates/p1005-protocol   ZjStream encoder + decoder. Pure. No I/O, no deps.
+crates/p1102-protocol   ZjStream encoder + decoder. Pure. No I/O, no deps.
                         Owns the wire format and its golden tests.
-crates/p1005-raster     CUPS raster reader + 8-bit gray -> 1 bpp. Pure. No libcups.
-crates/p1005-job        Raster stream -> printer job, a page at a time. Pure. No CUPS.
-crates/p1005-filter     The CUPS filter binary: a thin argv/stdin/stdout wrapper
-                        around p1005-job. This is the only CUPS-aware code.
-crates/p1005-cli        Offline tooling: inspect rasters, dump streams, encode a job
+crates/p1102-raster     CUPS raster reader + 8-bit gray -> 1 bpp. Pure. No libcups.
+crates/p1102-job        Raster stream -> printer job, a page at a time. Pure. No CUPS.
+crates/p1102-filter     The CUPS filter binary: a thin argv/stdin/stdout wrapper
+                        around p1102-job. This is the only CUPS-aware code.
+crates/p1102-cli        Offline tooling: inspect rasters, dump streams, encode a job
                         without involving CUPS at all.
 ```
 
@@ -107,7 +107,7 @@ raster and protocol, and raster and protocol depend on nothing. That is what let
 layer below the filter be exercised with a printer and a CUPS installation nowhere in
 sight, which is the property that made this testable on this machine at all.
 
-`p1005-usb` does not exist and is not currently needed: Apple's `usb` backend is already
+`p1102-usb` does not exist and is not currently needed: Apple's `usb` backend is already
 native, and the filter writes to stdout for CUPS to hand to it.
 
 **The filter streams.** It reads the raster one page at a time and hands each page's chunks to
@@ -130,13 +130,13 @@ byte-identical either way, which is how the refactor was checked.
 
 ## Installation shape
 
-The filter and a generated PPD go into `/Library/Printers/p1005/`, and a **new** queue is
+The filter and a generated PPD go into `/Library/Printers/p1102/`, and a **new** queue is
 created alongside HP's rather than replacing it. HP's installation is read but never
 written. See `docs/installation.md`.
 
 ## Remaining technical risk
 
-**The compressor is no longer the gap.** JBIG is implemented in `crates/p1005-jbig` and its
+**The compressor is no longer the gap.** JBIG is implemented in `crates/p1102-jbig` and its
 output is byte-identical to the reference implementation of the standard, verified against
 four embedded golden vectors and a 22-case sweep. It emits the simplest conforming
 configuration (one layer, one plane, no typical prediction, no adaptive template, `L0` =
@@ -144,8 +144,8 @@ configuration (one layer, one plane, no typical prediction, no adaptive template
 must accept. Details and the exact parameters are in `docs/jbig.md`.
 
 The uncompressed `ZJT_RAW_IMAGE` path is also implemented and selectable with
-`P1005_RAW=1`, because whether the printer accepts it is still an open hardware question
-and it is a useful fallback to have. `p1005-job` prepares the same 1 bpp bitmap either way,
+`P1102_RAW=1`, because whether the printer accepts it is still an open hardware question
+and it is a useful fallback to have. `p1102-job` prepares the same 1 bpp bitmap either way,
 so choosing between the two encoders touches no other layer.
 
 What remains is therefore hardware validation, not design or implementation:

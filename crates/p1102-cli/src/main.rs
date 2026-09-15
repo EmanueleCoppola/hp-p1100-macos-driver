@@ -1,14 +1,14 @@
-//! `p1005` command line tool.
+//! `p1102` command line tool.
 //!
 //! Deliberately dependency-free and usable before CUPS integration exists, so the
 //! protocol work can be tested on its own:
 //!
 //! ```text
-//! p1005 raster-info   <cups-raster-file>
-//! p1005 raster-to-mono1 <cups-raster-file> <out.raw>
-//! p1005 raster-to-zjs <cups-raster-file> <out.zjs> [--no-pjl]
-//! p1005 zjs-dump      <zjs-file>
-//! p1005 wrap --bih <file> [--bid <file> ...] --width W --height H --resolution R \
+//! p1102 raster-info   <cups-raster-file>
+//! p1102 raster-to-mono1 <cups-raster-file> <out.raw>
+//! p1102 raster-to-zjs <cups-raster-file> <out.zjs> [--no-pjl]
+//! p1102 zjs-dump      <zjs-file>
+//! p1102 wrap --bih <file> [--bid <file> ...] --width W --height H --resolution R \
 //!            [--paper-code N] [--no-pjl] -o <out.zjs>
 //! ```
 
@@ -16,12 +16,12 @@ use std::env;
 use std::fs;
 use std::process::ExitCode;
 
-use p1005_job::{encode_raster_job, Options as JobOpts, TestPattern};
-use p1005_protocol::{
+use p1102_job::{encode_raster_job, Options as JobOpts, TestPattern};
+use p1102_protocol::{
     decode, op_name, pjl_epilogue, pjl_prologue, strip_pjl_framing, Encoder, JobOptions,
     PageGeometry, PjlSettings,
 };
-use p1005_raster::{to_mono1, RasterReader, DEFAULT_THRESHOLD};
+use p1102_raster::{to_mono1, RasterReader, DEFAULT_THRESHOLD};
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -53,16 +53,16 @@ fn main() -> ExitCode {
 }
 
 const USAGE: &str = "\
-p1005 - HP LaserJet Professional P1102 tooling
+p1102 - HP LaserJet Professional P1102 tooling
 
 USAGE:
-  p1005 raster-info    <cups-raster-file>
-  p1005 raster-to-mono1 <cups-raster-file> <out.raw>
-  p1005 raster-to-zjs  <cups-raster-file> <out.zjs> [--no-pjl]
-  p1005 test-page      <pattern> [-o <out.zjs>] [--page letter|a4|legal] [--dpi N]
+  p1102 raster-info    <cups-raster-file>
+  p1102 raster-to-mono1 <cups-raster-file> <out.raw>
+  p1102 raster-to-zjs  <cups-raster-file> <out.zjs> [--no-pjl]
+  p1102 test-page      <pattern> [-o <out.zjs>] [--page letter|a4|legal] [--dpi N]
                                   [--raw] [--no-pjl] [--list]
-  p1005 zjs-dump       <zjs-file>
-  p1005 wrap --bih <file> [--bid <file> ...] --width W --height H --resolution R
+  p1102 zjs-dump       <zjs-file>
+  p1102 wrap --bih <file> [--bid <file> ...] --width W --height H --resolution R
              [--paper-code N] [--no-pjl] -o <out.zjs>
 
 NOTES:
@@ -74,7 +74,7 @@ NOTES:
   without CUPS or a source document. To send a job with no build and no filter at all,
   point a raw queue at the device and push the file straight through it:
 
-      p1005 test-page square -o /tmp/square.zjs
+      p1102 test-page square -o /tmp/square.zjs
       sudo lpadmin -p P1102_raw -E -v usb://... -m raw
       lp -d P1102_raw -o raw /tmp/square.zjs
 
@@ -178,7 +178,7 @@ fn zjs_dump(args: &[String]) -> Result<(), String> {
             c.header.signature
         );
         for it in &c.items {
-            let value = if it.ty == p1005_protocol::item_type::UINT32 && it.payload.len() == 4 {
+            let value = if it.ty == p1102_protocol::item_type::UINT32 && it.payload.len() == 4 {
                 format!(
                     "u32={}",
                     u32::from_be_bytes([
@@ -188,7 +188,7 @@ fn zjs_dump(args: &[String]) -> Result<(), String> {
                         it.payload[3]
                     ])
                 )
-            } else if it.ty == p1005_protocol::item_type::STRING {
+            } else if it.ty == p1102_protocol::item_type::STRING {
                 let end = it
                     .payload
                     .iter()
@@ -316,17 +316,17 @@ fn test_page(args: &[String]) -> Result<(), String> {
         height = (f64::from(height) * f).round() as u32;
     }
 
-    let bitmap = p1005_job::test_page_bitmap(pattern, width, height);
+    let bitmap = p1102_job::test_page_bitmap(pattern, width, height);
     let opts = JobOpts {
         encoding: if raw {
-            p1005_job::ImageEncoding::Raw
+            p1102_job::ImageEncoding::Raw
         } else {
-            p1005_job::ImageEncoding::Jbig
+            p1102_job::ImageEncoding::Jbig
         },
         pjl,
         ..JobOpts::default()
     };
-    let job = p1005_job::encode_bitmap_job(&bitmap, width, height, dpi, *paper, &opts)
+    let job = p1102_job::encode_bitmap_job(&bitmap, width, height, dpi, *paper, &opts)
         .map_err(|e| e.to_string())?;
     fs::write(&out, &job).map_err(|e| format!("cannot write {out}: {e}"))?;
     eprintln!(
@@ -350,7 +350,7 @@ fn wrap(args: &[String]) -> Result<(), String> {
     let mut width = 0u32;
     let mut height = 0u32;
     let mut resolution = 600u32;
-    let mut paper = p1005_protocol::paper::LETTER;
+    let mut paper = p1102_protocol::paper::LETTER;
     let mut pjl = true;
 
     let mut i = 0;
@@ -402,12 +402,12 @@ fn wrap(args: &[String]) -> Result<(), String> {
         return Err("--width and --height are required".into());
     }
     let bih = read_file(&bih_path)?;
-    if bih.len() != p1005_protocol::JBIG_BIH_LEN {
+    if bih.len() != p1102_protocol::JBIG_BIH_LEN {
         return Err(format!(
             "{} is {} bytes; the JBIG BIH must be exactly {} bytes",
             bih_path,
             bih.len(),
-            p1005_protocol::JBIG_BIH_LEN
+            p1102_protocol::JBIG_BIH_LEN
         ));
     }
     let mut bid_data = Vec::new();

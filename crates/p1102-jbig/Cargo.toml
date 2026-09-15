@@ -1,6 +1,6 @@
 [package]
-name = "p1005-protocol"
-description = "ZjStream (ZJS) encoder and decoder for HP host-based LaserJets"
+name = "p1102-jbig"
+description = "JBIG (T.82) encoder for bi-level page images"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

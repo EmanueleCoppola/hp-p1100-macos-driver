@@ -5,7 +5,7 @@ This is the closest thing to the real integration that can be done before the ha
 arrives, and it exercises the exact boundary CUPS uses:
 
     Apple's cgpdftoraster  ->  our filter  ->  job bytes
-    (cupsfilter, native)       (p1005-filter)   (judged by the reference JBIG decoder)
+    (cupsfilter, native)       (p1102-filter)   (judged by the reference JBIG decoder)
 
 Every piece of that is real: the raster comes from the same filter CUPS would run, the job
 is produced by our actual filter binary with the argv shape CUPS uses, and the result is
@@ -31,8 +31,8 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
-NATIVE_FILTER = os.path.join(REPO, 'target/release/p1005-filter')
-WASM_FILTER = os.path.join(REPO, 'target/wasm32-wasip1/debug/p1005-filter.wasm')
+NATIVE_FILTER = os.path.join(REPO, 'target/release/p1102-filter')
+WASM_FILTER = os.path.join(REPO, 'target/wasm32-wasip1/debug/p1102-filter.wasm')
 PPD = '/etc/cups/ppd/HP_LaserJet_Professional_P1102.ppd'
 
 
@@ -62,7 +62,7 @@ def wasi_command(extra_env=None):
     be passed explicitly with --env. node's WASI takes them from process.env instead.
     """
     extra_env = extra_env or {}
-    wt = os.environ.get('P1005_WASMTIME') or shutil.which('wasmtime')
+    wt = os.environ.get('P1102_WASMTIME') or shutil.which('wasmtime')
     if wt:
         cmd = [wt, 'run', '--dir', '/']
         for key, value in extra_env.items():
@@ -87,7 +87,7 @@ def make_raster(text, out_path):
 
 
 def run_filter(raster_path, options, out_path, raw=False):
-    overrides = {'P1005_RAW': '1'} if raw else {}
+    overrides = {'P1102_RAW': '1'} if raw else {}
     prefix, route = filter_command(overrides)
     if route == 'native':
         cmd = prefix + ['1', 'manu', 'rehearsal', '1', options, raster_path]
@@ -177,12 +177,12 @@ def main(argv):
         return fail('build the filter first:\n'
                     '    scripts/build-native.sh\n'
                     '  or, where native linking is unavailable:\n'
-                    '    cargo build --target wasm32-wasip1 -p p1005-filter --offline')
+                    '    cargo build --target wasm32-wasip1 -p p1102-filter --offline')
 
     cr = load('cupsraster')
     zc = load('zjs-compare')
 
-    work = args.keep or tempfile.mkdtemp(prefix='p1005-rehearsal-')
+    work = args.keep or tempfile.mkdtemp(prefix='p1102-rehearsal-')
     os.makedirs(work, exist_ok=True)
     raster_path = os.path.join(work, 'page.raster')
     job_path = os.path.join(work, 'job.zjs')

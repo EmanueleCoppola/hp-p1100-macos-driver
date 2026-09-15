@@ -1,4 +1,4 @@
-# p1005-drivers
+# p1102-drivers
 
 A native Apple Silicon replacement for the Intel-only HP driver that drives the
 **HP LaserJet Professional P1102**.
@@ -67,12 +67,12 @@ middle stage is ours.
 
 ## Repository layout
 
-    crates/p1005-protocol/   ZjStream encoder + decoder. Pure, no dependencies.
-    crates/p1005-raster/     CUPS raster reader and mono conversion. No libcups.
-    crates/p1005-job/        CUPS raster stream -> complete printer job. No CUPS.
-    crates/p1005-jbig/       JBIG (T.82) compressor for the page image. Pure.
-    crates/p1005-filter/     The CUPS filter binary: a thin wrapper around p1005-job.
-    crates/p1005-cli/        Offline tooling: inspect rasters, dump streams, encode a job.
+    crates/p1102-protocol/   ZjStream encoder + decoder. Pure, no dependencies.
+    crates/p1102-raster/     CUPS raster reader and mono conversion. No libcups.
+    crates/p1102-job/        CUPS raster stream -> complete printer job. No CUPS.
+    crates/p1102-jbig/       JBIG (T.82) compressor for the page image. Pure.
+    crates/p1102-filter/     The CUPS filter binary: a thin wrapper around p1102-job.
+    crates/p1102-cli/        Offline tooling: inspect rasters, dump streams, encode a job.
     scripts/                 inspection tools, test runner, PPD generator, installer.
     docs/                    findings, written as they are confirmed.
     fixtures/inputs/         tiny deterministic source documents.
@@ -129,7 +129,7 @@ Remove it again, leaving HP's installation untouched:
     ./scripts/uninstall.sh --dry-run
     sudo ./scripts/uninstall.sh
 
-That installs the filter and a generated PPD into /Library/Printers/p1005 and creates a new
+That installs the filter and a generated PPD into /Library/Printers/p1102 and creates a new
 queue alongside HP's. HP's installation is read but never written, SIP is untouched, and no
 kernel or system extension is involved.
 
@@ -139,11 +139,11 @@ kernel or system extension is involved.
 Homebrew Python is needed for the scripts, because Apple's /usr/bin/python3 is behind the
 same licence gate.
 
-    p1005 raster-info     <cups-raster-file>
-    p1005 raster-to-mono1 <cups-raster-file> <out.raw>
-    p1005 raster-to-zjs   <cups-raster-file> <out.zjs> [--no-pjl]
-    p1005 zjs-dump        <zjs-file>
-    p1005 wrap --bih <file> --bid <file> ... --width W --height H -o out.zjs
+    p1102 raster-info     <cups-raster-file>
+    p1102 raster-to-mono1 <cups-raster-file> <out.raw>
+    p1102 raster-to-zjs   <cups-raster-file> <out.zjs> [--no-pjl]
+    p1102 zjs-dump        <zjs-file>
+    p1102 wrap --bih <file> --bid <file> ... --width W --height H -o out.zjs
 
     PY=/opt/homebrew/bin/python3.13
     $PY scripts/macho.py info   <file>          # architecture, min OS, uuid, entry
@@ -161,8 +161,8 @@ same licence gate.
 The real tool can also be built and run without a compiler, because wasm links with Rust's
 own linker and needs no SDK:
 
-    cargo build --target wasm32-wasip1 -p p1005-cli --offline
-    node scripts/wasi-run.mjs target/wasm32-wasip1/debug/p1005.wasm test-page square -o /tmp/x.zjs
+    cargo build --target wasm32-wasip1 -p p1102-cli --offline
+    node scripts/wasi-run.mjs target/wasm32-wasip1/debug/p1102.wasm test-page square -o /tmp/x.zjs
 
 That is how the Rust implementation was checked against the reference without the licence:
 all eight test pages come out byte-identical to the reference-verified Python path, and the
@@ -234,7 +234,7 @@ Not verified:
 2. Attach the P1102; record ioreg USB descriptors, VID/PID, endpoints, interface class, and
    whether the device re-enumerates after a power cycle.
 3. Send a minimal page. The default path is now JBIG-compressed, so the first question is
-   simply whether a page prints; `P1005_RAW=1` switches the filter to the uncompressed
+   simply whether a page prints; `P1102_RAW=1` switches the filter to the uncompressed
    ZJT_RAW_IMAGE form if the compressed one is rejected.
 4. Only then look at golden-master comparison. The old filter cannot run here, so
    reference output has to come from a capture or from another machine; options are in
@@ -258,4 +258,4 @@ thing necessarily shared is the normative T.82 arithmetic coder table, which eve
 JBIG implementation must contain.
 
 Say the word if you would rather it were GPL-2.0, or if you want a specific copyright holder
-named instead of "the p1005-drivers authors"; both are one-line changes.
+named instead of "the p1102-drivers authors"; both are one-line changes.

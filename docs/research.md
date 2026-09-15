@@ -108,7 +108,7 @@ is a change of two files plus this paragraph. A permissive default was chosen an
 here rather than assumed, because the manifest already declared it.
 
 **The one thing that is necessarily shared** is the normative T.82 arithmetic coder table in
-crates/p1005-jbig: a table of constants that every conforming JBIG implementation has to
+crates/p1102-jbig: a table of constants that every conforming JBIG implementation has to
 contain, published in the standard, not copied implementation code.
 
 **JBIG is implemented, not deferred.** That supersedes the fallback reasoning this section

@@ -123,14 +123,14 @@ our single-layer encoder must not be compared against. Always pass **-d 0** when
 
 ## The implementation
 
-`crates/p1005-jbig` is a port of that verified prototype into pure Rust, with no
+`crates/p1102-jbig` is a port of that verified prototype into pure Rust, with no
 dependencies. Its output is byte-identical to the reference for the same configuration.
 Four vectors from the reference encoder are embedded as golden tests and run on every
 build: 8x2, 16x4, an 800x600 image spanning five stripes, and a degenerate 1x200 single
 column. `scripts/jbig-encode.py` remains as the prototype and as an independent
 cross-check of the Rust code.
 
-`p1005-job` feeds it the same bitmap the uncompressed path would use, and the JBIG line
+`p1102-job` feeds it the same bitmap the uncompressed path would use, and the JBIG line
 length is asserted to equal the raster row stride - a mismatch there would silently shear
 every page rather than fail.
 

@@ -18,7 +18,7 @@ use std::io::{self, Write};
 use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use p1005_job::{encode_raster_stream, format_timestamp, ImageEncoding, Options};
+use p1102_job::{encode_raster_stream, format_timestamp, ImageEncoding, Options};
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().collect();
@@ -49,7 +49,7 @@ fn main() -> ExitCode {
                 return fail(&format!("writing the job to stdout: {e}"));
             }
             eprintln!(
-                "p1005-filter: encoded {pages} page(s), {} bytes (pjl={}, encoding={:?})",
+                "p1102-filter: encoded {pages} page(s), {} bytes (pjl={}, encoding={:?})",
                 out.bytes, opts.pjl, opts.encoding
             );
             ExitCode::SUCCESS
@@ -59,7 +59,7 @@ fn main() -> ExitCode {
 }
 
 fn fail(message: &str) -> ExitCode {
-    eprintln!("p1005-filter: ERROR: {message}");
+    eprintln!("p1102-filter: ERROR: {message}");
     ExitCode::from(1)
 }
 
@@ -96,33 +96,33 @@ fn build_options(options: &str) -> Options {
         ),
         ..Options::default()
     };
-    p1005_job::apply_ppd_options(&mut opts, options);
+    p1102_job::apply_ppd_options(&mut opts, options);
 
     for token in options.split_whitespace() {
         // The PPD's own options are mapped by the library, which is where the mapping can
         // be tested against the real option strings.
-        if let Some(v) = token.strip_prefix("P1005Pjl=") {
+        if let Some(v) = token.strip_prefix("P1102Pjl=") {
             opts.pjl = matches!(v, "true" | "True" | "1" | "on");
         }
     }
 
-    if let Ok(v) = env::var("P1005_DENSITY") {
+    if let Ok(v) = env::var("P1102_DENSITY") {
         if let Ok(v) = v.parse::<u32>() {
             opts.density = v;
         }
     }
-    if let Ok(v) = env::var("P1005_ECONOMODE") {
+    if let Ok(v) = env::var("P1102_ECONOMODE") {
         opts.econo_mode = v == "1" || v.eq_ignore_ascii_case("true");
     }
-    if let Ok(v) = env::var("P1005_NO_PJL") {
+    if let Ok(v) = env::var("P1102_NO_PJL") {
         if v == "1" || v.eq_ignore_ascii_case("true") {
             opts.pjl = false;
         }
     }
-    // JBIG compression is the default, as the printer expects. P1005_RAW forces the
+    // JBIG compression is the default, as the printer expects. P1102_RAW forces the
     // uncompressed image instead, which exists only to test on hardware whether the
     // printer accepts ZJT_RAW_IMAGE at all.
-    if let Ok(v) = env::var("P1005_RAW") {
+    if let Ok(v) = env::var("P1102_RAW") {
         if v == "1" || v.eq_ignore_ascii_case("true") {
             opts.encoding = ImageEncoding::Raw;
         }
@@ -143,8 +143,8 @@ mod encoding_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use p1005_job::DEFAULT_DENSITY;
-    use p1005_protocol::duplex as zduplex;
+    use p1102_job::DEFAULT_DENSITY;
+    use p1102_protocol::duplex as zduplex;
 
     #[test]
     fn defaults_are_the_printers_normal_settings() {
@@ -178,7 +178,7 @@ mod tests {
 
     #[test]
     fn explicit_options_override_defaults() {
-        let o = build_options("pjlDensity=5 EconoMode=True pjlJamRecovery=True P1005Pjl=false");
+        let o = build_options("pjlDensity=5 EconoMode=True pjlJamRecovery=True P1102Pjl=false");
         assert_eq!(o.density, 5);
         assert!(o.econo_mode);
         assert!(o.jam_recovery_auto);

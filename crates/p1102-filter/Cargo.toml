@@ -1,14 +1,14 @@
 [package]
-name = "p1005-filter"
+name = "p1102-filter"
 description = "CUPS filter turning application/vnd.cups-raster into ZjStream"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-p1005-job = { path = "../p1005-job" }
-p1005-protocol = { path = "../p1005-protocol" }
+p1102-job = { path = "../p1102-job" }
+p1102-protocol = { path = "../p1102-protocol" }
 
 [[bin]]
-name = "p1005-filter"
+name = "p1102-filter"
 path = "src/main.rs"

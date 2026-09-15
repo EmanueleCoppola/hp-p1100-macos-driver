@@ -16,7 +16,7 @@ The arithmetic coder is the standard's QM coder and the probability table is the
 normative one published in T.82 - it is a table of constants every implementation has to
 contain, not copied implementation code.
 
-This is the prototype the Rust implementation in crates/p1005-jbig has to match, and it
+This is the prototype the Rust implementation in crates/p1102-jbig has to match, and it
 is checked byte for byte against the reference encoder:
 
     scripts/jbig-oracle.sh encode x.pbm ref.jbg

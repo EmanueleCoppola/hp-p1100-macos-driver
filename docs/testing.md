@@ -64,7 +64,7 @@ clang works and rust-lld does not.
 
 **The fix, and it works.** `scripts/make-stub-sdk.py` writes a link-only copy of the SDK's
 stubs with the offending entries removed from their target lists - non-destructive, in
-`~/.cache/p1005-stub-sdk`, nothing outside that directory is touched. For an arm64 link those
+`~/.cache/p1102-stub-sdk`, nothing outside that directory is touched. For an arm64 link those
 entries never apply anyway, so the symbol sets are the ones Apple's linker would use. Then:
 
 ```bash
@@ -74,8 +74,8 @@ scripts/build-native.sh          # picks the route and says which one it used
 produces ordinary native binaries:
 
 ```text
-target/release/p1005:        Mach-O 64-bit executable arm64
-target/release/p1005-filter: Mach-O 64-bit executable arm64
+target/release/p1102:        Mach-O 64-bit executable arm64
+target/release/p1102-filter: Mach-O 64-bit executable arm64
 ```
 
 Linking against stubs only describes the library at link time; the binary imports the real
@@ -227,7 +227,7 @@ python3 scripts/cupsraster.py scan /tmp/1p.raster
 
 Measured results are recorded in `docs/protocol.md`.
 
-`scripts/cupsraster.py` implements the same walk as `crates/p1005-raster` and is used as
+`scripts/cupsraster.py` implements the same walk as `crates/p1102-raster` and is used as
 a cross-check against real captured rasters; both agree, and both land exactly on EOF for
 1-, 2- and 3-page jobs, which is what validates the empirically derived header offsets.
 
@@ -295,7 +295,7 @@ DEBUG: argv[3]=<title>        DEBUG: argv[4]="1"        DEBUG: argv[5]=<options>
 DEBUG: argv[6]=<input file>
 ```
 
-That is exactly what p1005-filter implements: options at argv[5], the input file at argv[6],
+That is exactly what p1102-filter implements: options at argv[5], the input file at argv[6],
 and stdin when there is no file. Both routes are exercised by the rehearsal, and the option
 strings come from the printer's real PPD, so the remaining untested piece is narrow: whether
 cupsd reaches the filter at all with our PPD, which the first real print answers.
@@ -335,8 +335,8 @@ here, which is how the Rust implementation was checked against the reference rat
 only unit tested.
 
 ```bash
-cargo build --target wasm32-wasip1 -p p1005-cli --offline
-node scripts/wasi-run.mjs target/wasm32-wasip1/debug/p1005.wasm test-page square --page a4 -o /tmp/out.zjs
+cargo build --target wasm32-wasip1 -p p1102-cli --offline
+node scripts/wasi-run.mjs target/wasm32-wasip1/debug/p1102.wasm test-page square --page a4 -o /tmp/out.zjs
 ```
 
 scripts/wasi-run.mjs exposes the host root at the guest root, so the tool sees the same
@@ -344,7 +344,7 @@ files the native build would. A second runtime is available as a fallback, and i
 reliable of the two:
 
 ```bash
-wasmtime run --dir / target/wasm32-wasip1/debug/p1005.wasm raster-info big.raster
+wasmtime run --dir / target/wasm32-wasip1/debug/p1102.wasm raster-info big.raster
 ```
 
 This is a development and verification path, not the deliverable: what ships is the native
@@ -374,7 +374,7 @@ memory ceiling:
 - **wasmtime runs the identical module and input to completion with correct output.**
 
 Use wasmtime for large inputs and node for everything else. scripts/wasi-run.mjs accepts
-P1005_WASI_DEBUG=1 to report the guest's exit code, which is what distinguished "the guest
+P1102_WASI_DEBUG=1 to report the guest's exit code, which is what distinguished "the guest
 exited 139" from "node died".
 
 ## Verifying "native ARM64"
@@ -399,8 +399,8 @@ ways: HP's `rastertozjs` and `usbink` are reported `INTEL` and fail, while Apple
 
 ```text
 ./scripts/verify-native.sh
-  p1005                  native   Mach-O 64-bit executable arm64
-  p1005-filter           native   Mach-O 64-bit executable arm64
+  p1102                  native   Mach-O 64-bit executable arm64
+  p1102-filter           native   Mach-O 64-bit executable arm64
   OK: nothing Intel-only found.
 ```
 

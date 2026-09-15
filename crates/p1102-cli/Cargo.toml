@@ -1,0 +1,15 @@
+[package]
+name = "p1102-cli"
+description = "Command line tool for the p1102 driver stack"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+p1102-protocol = { path = "../p1102-protocol" }
+p1102-raster = { path = "../p1102-raster" }
+p1102-job = { path = "../p1102-job" }
+
+[[bin]]
+name = "p1102"
+path = "src/main.rs"

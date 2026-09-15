@@ -4,11 +4,11 @@
 
 Two files, both under a directory we own, plus one new CUPS queue:
 
-    /Library/Printers/p1005/p1005-filter    our ARM64 CUPS filter
-    /Library/Printers/p1005/p1005.ppd       generated PPD pointing at that filter
+    /Library/Printers/p1102/p1102-filter    our ARM64 CUPS filter
+    /Library/Printers/p1102/p1102.ppd       generated PPD pointing at that filter
     CUPS queue: HP_LaserJet_P1102_native    new queue, inherits the existing device URI
 
-Nothing outside /Library/Printers/p1005 is written. Specifically:
+Nothing outside /Library/Printers/p1102 is written. Specifically:
 
 - /Library/Printers/hp/** - HP's filters, frameworks, PPDs and utility - is only ever
   *read*. The source PPD is opened read-only to generate ours.
@@ -31,11 +31,11 @@ hand if you want to.
 
 A PPD's *cupsFilter line names the program by absolute path:
 
-    *cupsFilter: "application/vnd.cups-raster 100 /Library/Printers/p1005/p1005-filter"
+    *cupsFilter: "application/vnd.cups-raster 100 /Library/Printers/p1102/p1102-filter"
 
 When a job reaches the raster step, cupsd runs that program as
 
-    p1005-filter job-id user title copies options file
+    p1102-filter job-id user title copies options file
 
 feeding application/vnd.cups-raster on stdin and sending whatever the program writes to
 stdout on to the usb backend. There is no registration step and no registry: the path in
@@ -62,8 +62,8 @@ installing anything - the script only reads, and writes a new file:
     PYTHON=/opt/homebrew/bin/python3.13
     $PYTHON scripts/make-ppd.py \
         /etc/cups/ppd/HP_LaserJet_Professional_P1102.ppd \
-        /Library/Printers/p1005/p1005-filter /tmp/p1005.ppd
-    diff /etc/cups/ppd/HP_LaserJet_Professional_P1102.ppd /tmp/p1005.ppd
+        /Library/Printers/p1102/p1102-filter /tmp/p1102.ppd
+    diff /etc/cups/ppd/HP_LaserJet_Professional_P1102.ppd /tmp/p1102.ppd
 
 Apple's /usr/bin/python3 is a shim that refuses to run until the Xcode licence is
 accepted, hence the PYTHON= above. install.sh warns about that rather than failing
@@ -96,13 +96,13 @@ guard against a mistyped path.
     ./scripts/uninstall.sh --dry-run     # review
     sudo ./scripts/uninstall.sh
 
-That deletes the queue and removes /Library/Printers/p1005. HP's queue, files and receipts
+That deletes the queue and removes /Library/Printers/p1102. HP's queue, files and receipts
 are left alone.
 
 ## Verifying an install
 
     # the installed filter must be native
-    file /Library/Printers/p1005/p1005-filter     # expect Mach-O 64-bit executable arm64
+    file /Library/Printers/p1102/p1102-filter     # expect Mach-O 64-bit executable arm64
 
     # the queue exists and points at our PPD
     lpstat -v HP_LaserJet_P1102_native
@@ -120,7 +120,7 @@ are left alone.
 If a script fails halfway, this fully reverses it:
 
     lpadmin -x HP_LaserJet_P1102_native     # ignore an error if it does not exist
-    sudo rm -rf /Library/Printers/p1005
+    sudo rm -rf /Library/Printers/p1102
 
 ## Before you install: test the printer without building anything
 

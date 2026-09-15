@@ -4,7 +4,7 @@
 set -eu
 
 QUEUE=HP_LaserJet_P1102_native
-DEST=/Library/Printers/p1005
+DEST=/Library/Printers/p1102
 DRY=0
 
 usage() {

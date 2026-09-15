@@ -460,7 +460,7 @@ pub enum DecodeError {
     ChunkSizeTooSmall(u32),
 }
 
-/// Decode a complete ZjStream. Used by `p1005 zjs-dump` and by round-trip tests.
+/// Decode a complete ZjStream. Used by `p1102 zjs-dump` and by round-trip tests.
 pub fn decode(stream: &[u8]) -> Result<Vec<DecodedChunk>, DecodeError> {
     if stream.len() < 4 || &stream[..4] != STREAM_SIGNATURE {
         return Err(DecodeError::BadStreamSignature);

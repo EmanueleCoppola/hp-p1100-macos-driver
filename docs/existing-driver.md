@@ -97,7 +97,7 @@ CoreFoundation.
 | backend/usb | libcups.2, IOKit, SystemConfiguration, Security, libresolv.9, libiconv.2, libz.1 |
 | HP rastertozjs | **libcups.2, libcupsimage.2, libstdc++.6**, Foundation, Accelerate, libobjc |
 | HP usbink | libcups.2, IOKit, AppKit, Foundation, libobjc |
-| our p1005-filter | **only `/usr/lib/libSystem.B.dylib`** |
+| our p1102-filter | **only `/usr/lib/libSystem.B.dylib`** |
 
 Three things this table shows that are worth stating plainly.
 

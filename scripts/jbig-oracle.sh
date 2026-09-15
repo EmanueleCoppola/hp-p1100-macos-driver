@@ -25,7 +25,7 @@
 
 set -eu
 
-ORACLE_DIR=${P1005_ORACLE_DIR:-$HOME/.cache/p1005-jbig-oracle}
+ORACLE_DIR=${P1102_ORACLE_DIR:-$HOME/.cache/p1102-jbig-oracle}
 BOTTLE_URL='https://ghcr.io/v2/homebrew/core/jbigkit/blobs/sha256:a7cc930c8a3652caa237eb15f5528d6a9384ba2e14b7414de8946fe0fedf6816'
 BOTTLE_SHA='a7cc930c8a3652caa237eb15f5528d6a9384ba2e14b7414de8946fe0fedf6816'
 VERSION=2.1
@@ -91,7 +91,7 @@ decode() {
 verify() {
     need
     [ $# -eq 2 ] || { echo "usage: $0 verify <ours.jbg> <expected.pbm>" >&2; exit 2; }
-    tmp=$(mktemp -t p1005-verify)
+    tmp=$(mktemp -t p1102-verify)
     decode "$1" "$tmp"
     "$PYTHON" "$HERE/pbm-compare.py" "$2" "$tmp"
     rm -f "$tmp"

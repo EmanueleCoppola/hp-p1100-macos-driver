@@ -1,14 +1,14 @@
 [package]
-name = "p1005-job"
+name = "p1102-job"
 description = "Assemble a ZjStream job from a CUPS raster stream"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-p1005-protocol = { path = "../p1005-protocol" }
-p1005-raster = { path = "../p1005-raster" }
-p1005-jbig = { path = "../p1005-jbig" }
+p1102-protocol = { path = "../p1102-protocol" }
+p1102-raster = { path = "../p1102-raster" }
+p1102-jbig = { path = "../p1102-jbig" }
 
 [lib]
 path = "src/lib.rs"

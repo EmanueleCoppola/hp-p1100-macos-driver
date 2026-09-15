@@ -1,11 +1,11 @@
 #!/bin/sh
-# Install the native p1005 filter and create a CUPS queue for the HP LaserJet P1102.
+# Install the native p1102 filter and create a CUPS queue for the HP LaserJet P1102.
 #
 # Design rules, intentionally:
 #   - The existing HP installation is read but never written. The source PPD is only read.
 #   - A new queue is created under a new name; the working (or broken) HP queue is left
 #     exactly as it was, so this is reversible and side-by-side.
-#   - Everything we add lives under /Library/Printers/p1005, one directory to delete.
+#   - Everything we add lives under /Library/Printers/p1102, one directory to delete.
 #   - No SIP change, no system extension, no kernel extension, nothing disabled.
 #
 # `--dry-run` prints every command without running it and needs no privileges.
@@ -14,9 +14,9 @@ set -eu
 
 QUEUE=HP_LaserJet_P1102_native
 SOURCE_QUEUE=HP_LaserJet_Professional_P1102
-DEST=/Library/Printers/p1005
+DEST=/Library/Printers/p1102
 REPO=$(cd "$(dirname "$0")/.." && pwd)
-FILTER="$REPO/target/release/p1005-filter"
+FILTER="$REPO/target/release/p1102-filter"
 PYTHON=${PYTHON:-python3}
 DRY=0
 FORCE=0
@@ -121,15 +121,15 @@ fi
 echo
 echo "1. installing the filter and PPD into $DEST"
 run mkdir -p "$DEST"
-run /usr/bin/install -m 0755 -o root -g wheel "$FILTER" "$DEST/p1005-filter"
-run "$PYTHON" "$REPO/scripts/make-ppd.py" "$SRC_PPD" "$DEST/p1005-filter" "$DEST/p1005.ppd"
+run /usr/bin/install -m 0755 -o root -g wheel "$FILTER" "$DEST/p1102-filter"
+run "$PYTHON" "$REPO/scripts/make-ppd.py" "$SRC_PPD" "$DEST/p1102-filter" "$DEST/p1102.ppd"
 
 echo
 echo "2. creating the queue '$QUEUE'"
 if [ "$FORCE" = 1 ]; then
     run lpadmin -x "$QUEUE" 2>/dev/null || true
 fi
-run lpadmin -p "$QUEUE" -E -v "$DEVICE" -P "$DEST/p1005.ppd"
+run lpadmin -p "$QUEUE" -E -v "$DEVICE" -P "$DEST/p1102.ppd"
 run lpadmin -p "$QUEUE" -o printer-is-shared=false
 run cupsenable "$QUEUE"
 run cupsaccept "$QUEUE"
