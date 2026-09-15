@@ -145,7 +145,8 @@ strong one:
 ### Result
 
 `scripts/jbig-sweep.py` runs 21 deterministic bitmaps through both implementations in both
-configurations - 42 comparisons - and requires byte identity. It reports all 42 identical.
+configurations, plus six two-plane pages against the reference encoder's multi-plane
+configuration, and requires byte identity: 48 comparisons, and it reports every one identical.
 The set covers blank and solid images, uniform noise (the hardest case for an arithmetic
 coder), a single row, a single column, odd widths (7, 9, 63, 65, 127, 255, 1000), exact
 stripe boundaries, and widths either side of the 128-pixel alignment.

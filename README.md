@@ -161,7 +161,8 @@ same licence gate.
     $PY scripts/macho.py libs   <file>          # linked dylibs and rpaths
     $PY scripts/macho.py syms   <file> 'zjs'    # symbol table, filtered
     $PY scripts/macho.py strings <file> 8       # printable strings with offsets
-    $PY scripts/hp-tone-table.py                # the grey tone tables HP's driver uses
+    $PY scripts/hp-tone-table.py                # HP's grey tone tables: checked, and --convert
+                                                # screens a page with them into two bits
     $PY scripts/elfinfo.py      <firmware.acl>  # ELF identity of HP device firmware
     $PY scripts/cupsraster.py dump <file>       # CUPS raster pages, validated against EOF
     $PY scripts/make-test-job.py --list         # deterministic bring-up test pages
@@ -249,7 +250,7 @@ The request had eleven phases. Where each one landed, and what its evidence is:
 | 5. firmware handling | `docs/protocol.md` | resolved for this bundle (no firmware blob, none uploaded); the device side needs the printer |
 | 6. design the replacement | `docs/architecture.md` | done: PPD plus filter, chosen explicitly over a Printer Application and re-hosting kept cheap |
 | 7. Rust implementation | `crates/` | done: four pure libraries, a CLI and the filter, no dependencies beyond libSystem |
-| 8. golden-master comparison | `scripts/reference-compare.py` | done in the only form available: 28 cases against the reference driver, since HP's binary cannot run on this Mac |
+| 8. golden-master comparison | `scripts/reference-compare.py` | done in the only form available: 31 cases against the reference driver, since HP's binary cannot run on this Mac |
 | 9. real printer testing | `scripts/make-test-job.py`, `docs/testing.md` | **blocked**: needs the printer attached, and the first test needs no build, no install and no administrator |
 | 10. native ARM64 verification | `scripts/verify-native.sh` | done for the binaries and the chain; the print-time process check needs a print |
 | 11. installation | `scripts/install.sh`, `scripts/uninstall.sh` | done, with a dry run that checks the PPD it would install; a real install needs `sudo` |
