@@ -161,6 +161,7 @@ same licence gate.
     $PY scripts/macho.py libs   <file>          # linked dylibs and rpaths
     $PY scripts/macho.py syms   <file> 'zjs'    # symbol table, filtered
     $PY scripts/macho.py strings <file> 8       # printable strings with offsets
+    $PY scripts/hp-tone-table.py                # the grey tone tables HP's driver uses
     $PY scripts/elfinfo.py      <firmware.acl>  # ELF identity of HP device firmware
     $PY scripts/cupsraster.py dump <file>       # CUPS raster pages, validated against EOF
     $PY scripts/make-test-job.py --list         # deterministic bring-up test pages

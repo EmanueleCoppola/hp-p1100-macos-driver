@@ -63,6 +63,8 @@ echo
 echo 'what the machine can see:'
 run 'native ARM64 check, with HP control' ./scripts/verify-native.sh --include-hp
 run 'pre-flight self-test' "$PY" scripts/preflight-usb.py --selftest
+run 'HP gray tone tables, read and checked' "$PY" scripts/hp-tone-table.py
+run 'tone table check, self-test' "$PY" scripts/hp-tone-table.py --selftest
 echo
 echo 'correctness against the references:'
 if [ "$QUICK" = 1 ]; then

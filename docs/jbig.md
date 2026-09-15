@@ -46,6 +46,12 @@ easy to get wrong and produces a stream no decoder accepts.
 `JBG_DELAY_AT` (0x100) and `JBG_SDRST` (0x200) are library-level switches, not BIH fields,
 which is why the options byte is masked with 0x7f before being written.
 
+`planes` is 1 in the BIH this repository writes, and 1 is what the reference driver sends. HP's
+own driver writes **2** for this printer, because the `cupsCompression` markers in its PPD put it
+on the two-bit path; item 11 of `docs/differences.md` has that reading, the 256-entry tone
+tables behind it, and what a two-bit implementation would need. The encoder here is
+single-plane by design.
+
 ## Body layout
 
 After the 20-byte BIH, for each stripe:

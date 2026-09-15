@@ -189,6 +189,13 @@ The reference implementation drives the P1102 as model `2` with flags `-P -z2 -L
   Bitmap scanlines are padded to a 16-byte (128-bit) multiple.
 - `ZJI_VIDEO_X` is `raster_width / bits_per_pixel`; `ZJI_VIDEO_BPP` is 1 for monochrome.
 
+What HP's own driver sends for this printer is not that shape. Its PPD sets
+`cupsCompression` to 401 - and to 1 for the other resolution choice - and the driver turns
+`compression & 1` into **two** bits per pixel, so its pages carry two bi-level image entities
+where ours carry one (item 11 of `docs/differences.md` has the reading, the tone tables and
+what a two-bit implementation would need). Ours is the one-bit shape above, which is what the
+reference driver sends and what `scripts/reference-compare.py` covers.
+
 ### Page size codes (`ZJI_DMPAPER`)
 
 CUPS puts the PPD's `*PageSize` choice name into the raster header - measured by running
