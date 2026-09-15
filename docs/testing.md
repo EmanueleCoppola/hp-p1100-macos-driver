@@ -333,9 +333,10 @@ $XC/nm "$F" | $XC/c++filt | grep 'jbig::'          # its own encoder's surface
 $XC/otool -tvV -p __ZN4jbig12ZjbigEncoderC1EiiRN4zeno7IWriterE "$F"
 ```
 
-That is how the BIH defaults `0x5c` / order `3` / `MX 16` in `docs/protocol.md` were read
-off, and how the PJL literal list in `docs/differences.md` was checked. `c++filt` is a
-harness from the same toolchain directory: `/usr/bin/c++filt` is gated too.
+That is how the BIH defaults (`options 0x5c`, order `3`) and the encoder configuration
+behind them were read off, and how the PJL literal list in `docs/differences.md` was
+checked. `c++filt` is a harness from the same toolchain directory: `/usr/bin/c++filt` is
+gated too.
 
 ## Hardware bring-up with no build at all
 
@@ -620,9 +621,9 @@ way the filter does, so what is compared is the job encoding rather than the gre
 (item 11 of that list, and the script now refuses a fixture with grey in it).
 
 For HP's own output specifically, the binary can still be *read* even though it cannot be
-run, which is how its BIH defaults and its complete PJL literal list were determined. Where
-the two implementations are known to differ - the wrapper, the adaptive template - HP's side
-is documented from that reading rather than measured, and tagged accordingly.
+run, which is how its BIH defaults, its encoder configuration and its complete PJL literal
+list were determined. Where the two implementations are known to differ - the wrapper is the
+one - HP's side is documented from that reading rather than measured, and tagged accordingly.
 
 ## Running the real code without a native linker (wasm)
 

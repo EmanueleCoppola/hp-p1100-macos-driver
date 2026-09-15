@@ -197,10 +197,10 @@ so choosing between the two encoders touches no other layer.
 What remains is therefore hardware validation, not design or implementation:
 
 1. Whether the printer accepts our framing, item sets and PJL wrapper at all.
-2. Whether it accepts our JBIG stream. The stream is byte-identical to the reference
-   driver's, so a rejection here would mean a *printer-specific* constraint rather than an
-   encoder bug, and the adaptive template (item 2 of `docs/differences.md`) is the one
-   parameter where HP's driver may differ from ours.
+2. Whether it accepts our JBIG stream. The BIH options, the order, L0 and the adaptive
+   template are all what HP's own encoder is configured with as well as what the reference
+   driver sends (item 2 of `docs/differences.md`), so a rejection here would mean a
+   *printer-specific* constraint rather than an encoder bug.
 3. Whether `ZJT_RAW_IMAGE` works, and whether the 128-pixel-aligned row stride is what it
    expects.
 4. Whether a power cycle needs a host-side firmware download. **LIKELY no**, but unverified.
@@ -214,6 +214,6 @@ docs/differences.md.
   endpoint layout, framing acceptance and the raw-image question are all unverified.
 - Whether a filter-based queue survives future macOS releases is a migration question
   rather than a design one; the core is positioned so that it does not matter.
-- Whether our *specific* JBIG configuration is accepted, and whether HP's adaptive template
-  settings matter to the printer's decoder. Both are byte-verified against the reference
-  driver and unverified against the device.
+- Whether our *specific* JBIG configuration is accepted by the device's decoder. It is
+  byte-verified against the reference driver and matches what HP's encoder is configured
+  with, so this is an observation about the printer rather than an open design question.
