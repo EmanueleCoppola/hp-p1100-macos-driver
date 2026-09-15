@@ -903,6 +903,25 @@ mod tests {
         assert_eq!(value_of(items, item::RESOLUTION_X), 600);
     }
 
+    /// A two-bit page: the same items, with the depth carried through them the way that path
+    /// needs it. VIDEO_X is the width in pixels over the bits per pixel, NBIE counts the two
+    /// bi-level image entities, and RASTER_X stays the page's true width in pixels.
+    #[test]
+    fn page_start_carries_a_two_bit_depth() {
+        let mut enc = Encoder::new();
+        let mut g = PageGeometry::mono(4900, 6400, 600);
+        g.bits_per_pixel = 2;
+        g.ret = false;
+        enc.page_start(&g);
+        let chunks = decode_of(&mut enc);
+        let items = &chunks[0].items;
+        assert_eq!(value_of(items, item::VIDEO_BPP), 2);
+        assert_eq!(value_of(items, item::VIDEO_X), 2450);
+        assert_eq!(value_of(items, item::NBIE), 2);
+        assert_eq!(value_of(items, item::RASTER_X), 4900);
+        assert_eq!(value_of(items, item::RASTER_Y), 6400);
+    }
+
     #[test]
     fn page_start_emits_optional_items_only_when_set() {
         let mut g = PageGeometry::mono(100, 100, 600);
