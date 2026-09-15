@@ -451,6 +451,7 @@ included, was run with the native binary moved aside, and the wasm build carried
 | synthesised 1 bit per pixel raster | passes, both compressed and uncompressed |
 | raster with no pages | filter exits 1, no output |
 | raster truncated mid-page | filter exits 1, naming the page and the shortfall |
+| a hand invocation with fewer than seven arguments, and `--help` | exits 2 with the usage text on stderr, or 0 with it on stdout, and writes no job either way |
 
 ### What the rehearsal does not cover, and why
 

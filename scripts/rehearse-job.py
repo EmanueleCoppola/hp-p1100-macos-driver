@@ -397,6 +397,26 @@ def main(argv):
             print('       %s' % line)
     except Lever as exc:
         return fail(str(exc))
+
+    # The filter is not a friendly CLI - CUPS always passes seven arguments - but a typo when
+    # running it by hand should not look like a failed job, which is what it did before the
+    # guard existed: half a job on stdout and then an error about the raster.
+    prefix, route = filter_command()
+    base = prefix if route == 'native' else prefix + [WASM_FILTER]
+    for argv, want_code in ((['--help'], 0), ([], 2)):
+        proc = subprocess.run(base + argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              stdin=subprocess.DEVNULL)
+        # What must never appear is a job: neither the PJL exit sequence nor the stream
+        # signature. --help may write its usage text there, which is what help is for.
+        wrote_job = proc.stdout.startswith(b'\x1b%-12345X') or proc.stdout.startswith(zc.SYNC)
+        if proc.returncode != want_code or wrote_job:
+            return fail('the filter with argv %r exited %d and wrote %d bytes to stdout '
+                        '(a job: %s); expected exit %d and no job'
+                        % (argv, proc.returncode, len(proc.stdout), wrote_job, want_code))
+        if argv == ['--help'] and not proc.stdout.startswith(b'usage:'):
+            return fail('--help should print its usage text on stdout, got %r'
+                        % proc.stdout[:40])
+    print('       invocation guard: --help exits 0 and a short argv exits 2, neither writes a job')
     print()
     print('rehearsal passed%s' % ('' if args.keep else ' (temporary files removed)'))
     if args.keep:
