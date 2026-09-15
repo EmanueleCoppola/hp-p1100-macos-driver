@@ -4,8 +4,8 @@
 Why this exists: a two-bit page is ours to produce - HP's tone tables screened the driver's way,
 then two JBIG planes - and the only runnable implementation of the compression is the reference
 one. So the same page is built twice and the two jobs are compared: once through
-'p1102 raster-to-zjs --2bit --tone-table', and once through 'hp-tone-table.py --convert' and
-'pbmtojbg -b', wrapped by 'p1102 wrap --bits 2'. That compares our conversion, our two-plane
+'p1100 raster-to-zjs --2bit --tone-table', and once through 'hp-tone-table.py --convert' and
+'pbmtojbg -b', wrapped by 'p1100 wrap --bits 2'. That compares our conversion, our two-plane
 encoder and our framing with the reference's in one run. It is what caught the aligned columns
 being padded black instead of white, which is the kind of thing only an end-to-end check sees.
 
@@ -28,7 +28,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 PY = sys.executable
-CLI = os.path.join(REPO, 'target/release/p1102')
+CLI = os.path.join(REPO, 'target/release/p1100')
 ORACLE = os.path.join(HERE, 'jbig-oracle.sh')
 
 # The parameters the reference encoder is given for a two-plane image: binary words rather than
@@ -58,7 +58,7 @@ def main(argv):
         return 0
     if not os.path.exists(CLI):
         raise SystemExit('build the CLI first: scripts/build-native.sh')
-    work = tempfile.mkdtemp(prefix='p1102-two-bit-')
+    work = tempfile.mkdtemp(prefix='p1100-two-bit-')
     driver, offsets = tone.symbol_offsets(tone.HP_BINARY)
     size = tone.entry_size()[0]
     table_name = '_sdtahs10'

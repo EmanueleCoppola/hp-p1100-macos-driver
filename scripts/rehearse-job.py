@@ -5,7 +5,7 @@ This is the closest thing to the real integration that can be done before the ha
 arrives, and it exercises the exact boundary CUPS uses:
 
     Apple's cgpdftoraster  ->  our filter  ->  job bytes
-    (cupsfilter, native)       (p1102-filter)   (judged by the reference JBIG decoder)
+    (cupsfilter, native)       (p1100-filter)   (judged by the reference JBIG decoder)
 
 Every piece of that is real: the raster comes from the same filter CUPS would run, the job
 is produced by our actual filter binary with the argv shape CUPS uses, and the result is
@@ -32,8 +32,8 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
-NATIVE_FILTER = os.path.join(REPO, 'target/release/p1102-filter')
-WASM_FILTER = os.path.join(REPO, 'target/wasm32-wasip1/debug/p1102-filter.wasm')
+NATIVE_FILTER = os.path.join(REPO, 'target/release/p1100-filter')
+WASM_FILTER = os.path.join(REPO, 'target/wasm32-wasip1/debug/p1100-filter.wasm')
 PPD = '/etc/cups/ppd/HP_LaserJet_Professional_P1102.ppd'
 
 
@@ -63,7 +63,7 @@ def wasi_command(extra_env=None):
     be passed explicitly with --env. node's WASI takes them from process.env instead.
     """
     extra_env = extra_env or {}
-    wt = os.environ.get('P1102_WASMTIME') or shutil.which('wasmtime')
+    wt = os.environ.get('P1100_WASMTIME') or shutil.which('wasmtime')
     if wt:
         cmd = [wt, 'run', '--dir', '/']
         for key, value in extra_env.items():
@@ -150,7 +150,7 @@ def check_levers(raster_path, options, work, zc):
 
     Each is a diagnostic someone will type on the first hardware session, so each is run here
     and its effect checked: a lever that quietly did nothing would waste that session, and
-    until now only P1102_RAW had ever been exercised.
+    until now only P1100_RAW had ever been exercised.
     """
     lines = []
 
@@ -162,26 +162,26 @@ def check_levers(raster_path, options, work, zc):
                         % (code, ' '.join('%s=%s' % kv for kv in overrides.items()), stderr))
         return open(path, 'rb').read()
 
-    job = job_with({'P1102_NO_PJL': '1'}, 'no-pjl')
+    job = job_with({'P1100_NO_PJL': '1'}, 'no-pjl')
     if zc.semantic_view(job)['prologue'] or b'@PJL' in job or not job.startswith(zc.SYNC):
-        raise Lever('P1102_NO_PJL=1 did not remove the wrapper: the job should start at the '
+        raise Lever('P1100_NO_PJL=1 did not remove the wrapper: the job should start at the '
                     'JZJZ signature with no @PJL lines at all')
-    lines.append('P1102_NO_PJL=1: the job starts at the signature, with no wrapper')
+    lines.append('P1100_NO_PJL=1: the job starts at the signature, with no wrapper')
 
-    job = job_with({'P1102_DENSITY': '5'}, 'density')
+    job = job_with({'P1100_DENSITY': '5'}, 'density')
     if b'@PJL SET DENSITY=5\n' not in job:
-        raise Lever('P1102_DENSITY=5 did not change the PJL density line')
-    lines.append('P1102_DENSITY=5: the prologue carries DENSITY=5')
+        raise Lever('P1100_DENSITY=5 did not change the PJL density line')
+    lines.append('P1100_DENSITY=5: the prologue carries DENSITY=5')
 
-    job = job_with({'P1102_ECONOMODE': '1'}, 'econo')
+    job = job_with({'P1100_ECONOMODE': '1'}, 'econo')
     pages = [e[1]['items'] for e in zc.semantic_view(job)['events']
              if e[0] == 'chunk' and e[1]['op'] == 'START_PAGE']
     if not pages or pages[0].get('ECONOMODE') != 1:
-        raise Lever('P1102_ECONOMODE=1 did not set the ECONOMODE item on the page')
+        raise Lever('P1100_ECONOMODE=1 did not set the ECONOMODE item on the page')
     if b'@PJL SET ECONOMODE=ON\n' not in job:
-        raise Lever('P1102_ECONOMODE=1 did not set the PJL line')
-    lines.append('P1102_ECONOMODE=1: the page item and the PJL line both say so')
-    lines.append('P1102_RAW=1: covered by the payload check when the rehearsal runs --raw')
+        raise Lever('P1100_ECONOMODE=1 did not set the PJL line')
+    lines.append('P1100_ECONOMODE=1: the page item and the PJL line both say so')
+    lines.append('P1100_RAW=1: covered by the payload check when the rehearsal runs --raw')
 
     # CUPS hands a filter the queue's PPD in PPD and sends only the options the job named, so
     # the filter is expected to take the rest from the file. On this printer the visible one is
@@ -317,18 +317,18 @@ def check_ppd_option_coverage(ppd_path=None):
 
 
 def check_screened(raster_path, work, zc):
-    """p1102Grey=Screened2, the option that asks for HP's two-bit screening.
+    """p1100Grey=Screened2, the option that asks for HP's two-bit screening.
 
-    It needs the tone tables, which install.sh puts beside the filter and P1102_TONES points at
+    It needs the tone tables, which install.sh puts beside the filter and P1100_TONES points at
     here, so both halves are checked: with them the page carries ZJI_VIDEO_BPP 2 and two
     bi-level image entities, and without them the job stops with an error naming the file -
     rather than quietly printing the one-bit page the job did not ask for.
     """
     lines = []
     out = os.path.join(work, 'screened.zjs')
-    code, stderr, _ = run_filter(raster_path, 'p1102Grey=Screened2', out)
+    code, stderr, _ = run_filter(raster_path, 'p1100Grey=Screened2', out)
     if code == 0:
-        raise Lever('p1102Grey=Screened2 produced a job even though no tone table was reachable')
+        raise Lever('p1100Grey=Screened2 produced a job even though no tone table was reachable')
     if 'tones' not in stderr:
         raise Lever('the failure does not name the tone table it wanted: %r' % stderr)
     lines.append('with no tables reachable, Screened2 stops and names the file it needs')
@@ -341,11 +341,11 @@ def check_screened(raster_path, work, zc):
         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if generated.returncode != 0 or not os.path.exists(os.path.join(tables, 'sdtahs10.bin')):
         return lines + ['(no HP driver to read the tone tables from, so the rest was skipped)']
-    for src, dst in (('sdtahs10.bin', 'p1102-400.tones'), ('sdtahr10.bin', 'p1102-600.tones')):
+    for src, dst in (('sdtahs10.bin', 'p1100-400.tones'), ('sdtahr10.bin', 'p1100-600.tones')):
         shutil.copyfile(os.path.join(tables, src), os.path.join(tables, dst))
 
-    code, stderr, _ = run_filter(raster_path, 'p1102Grey=Screened2', out,
-                                 env_overrides={'P1102_TONES': tables})
+    code, stderr, _ = run_filter(raster_path, 'p1100Grey=Screened2', out,
+                                 env_overrides={'P1100_TONES': tables})
     if code != 0:
         raise Lever('the filter exited %d with the tables in place: %s' % (code, stderr))
     items = {}
@@ -362,7 +362,7 @@ def check_screened(raster_path, work, zc):
     return lines
 
 def run_filter(raster_path, options, out_path, raw=False, env_overrides=None):
-    overrides = {'P1102_RAW': '1'} if raw else {}
+    overrides = {'P1100_RAW': '1'} if raw else {}
     if env_overrides:
         overrides = dict(overrides, **env_overrides)
     prefix, route = filter_command(overrides)
@@ -383,7 +383,7 @@ def run_filter_on_stdin(raster_path, options, out_path, raw=False):
     (it is how the tool is used by hand), and the two must produce the same bytes - a
     difference there would mean the streaming reader depends on it being seekable.
     """
-    overrides = {'P1102_RAW': '1'} if raw else {}
+    overrides = {'P1100_RAW': '1'} if raw else {}
     prefix, route = filter_command(overrides)
     cmd = prefix if route == 'native' else prefix + [WASM_FILTER]
     cmd = cmd + ['1', 'manu', 'rehearsal', '1', options]
@@ -471,12 +471,12 @@ def main(argv):
         return fail('build the filter first:\n'
                     '    scripts/build-native.sh\n'
                     '  or, where native linking is unavailable:\n'
-                    '    cargo build --target wasm32-wasip1 -p p1102-filter --offline')
+                    '    cargo build --target wasm32-wasip1 -p p1100-filter --offline')
 
     cr = load('cupsraster')
     zc = load('zjs-compare')
 
-    work = args.keep or tempfile.mkdtemp(prefix='p1102-rehearsal-')
+    work = args.keep or tempfile.mkdtemp(prefix='p1100-rehearsal-')
     os.makedirs(work, exist_ok=True)
     raster_path = os.path.join(work, 'page.raster')
     job_path = os.path.join(work, 'job.zjs')

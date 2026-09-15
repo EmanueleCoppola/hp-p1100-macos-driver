@@ -37,7 +37,7 @@ fi
 QUICK=0
 [ "${1:-}" = "--quick" ] && QUICK=1
 
-TMP=$(mktemp -d -t p1102-verify) || exit 2
+TMP=$(mktemp -d -t p1100-verify) || exit 2
 trap 'rm -rf "$TMP"' EXIT INT TERM
 
 failed=0
@@ -53,7 +53,7 @@ run() {
     fi
 }
 
-echo 'P1102 verification'
+echo 'P1100 verification'
 echo
 echo 'build and tests:'
 run 'native build' ./scripts/build-native.sh

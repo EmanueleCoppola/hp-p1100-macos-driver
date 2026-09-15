@@ -23,7 +23,7 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
-FILTER = os.path.join(REPO, 'target/release/p1102-filter')
+FILTER = os.path.join(REPO, 'target/release/p1100-filter')
 PPD = '/etc/cups/ppd/HP_LaserJet_Professional_P1102.ppd'
 
 
@@ -63,7 +63,7 @@ def main(argv):
     if not os.path.exists(FILTER):
         raise SystemExit('build the filter first: ./scripts/build-native.sh')
 
-    work = tempfile.mkdtemp(prefix='p1102-memory-')
+    work = tempfile.mkdtemp(prefix='p1100-memory-')
     try:
         small = os.path.join(work, 'one.raster')
         large = os.path.join(work, 'many.raster')

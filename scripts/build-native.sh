@@ -119,7 +119,7 @@ if [ -z "$PYTHON" ]; then
     exit 1
 fi
 
-STUB=${P1102_STUB_SDK:-$HOME/.cache/p1102-stub-sdk}
+STUB=${P1100_STUB_SDK:-$HOME/.cache/p1100-stub-sdk}
 if [ "$REFRESH" = 1 ] || [ ! -d "$STUB/usr/lib" ]; then
     "$PYTHON" "$REPO/scripts/make-stub-sdk.py" --out "$STUB"
 fi

@@ -37,8 +37,8 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
-NATIVE_FILTER = os.path.join(REPO, 'target/release/p1102-filter')
-WASM_FILTER = os.path.join(REPO, 'target/wasm32-wasip1/debug/p1102-filter.wasm')
+NATIVE_FILTER = os.path.join(REPO, 'target/release/p1100-filter')
+WASM_FILTER = os.path.join(REPO, 'target/wasm32-wasip1/debug/p1100-filter.wasm')
 ORACLE = os.path.join(HERE, 'foo2zjs-oracle.sh')
 PPD = '/etc/cups/ppd/HP_LaserJet_Professional_P1102.ppd'
 
@@ -99,7 +99,7 @@ CASES = [
 # cupsMediaType field, which the PPD's MediaType option sets through the PostScript page
 # device - something cupsfilter cannot reproduce (its raster always says Paper/1), while
 # the reference takes the code as a flag. The mapping itself is covered by a unit test in
-# crates/p1102-job; what stays unverified is whether the printer wants HP's codes.
+# crates/p1100-job; what stays unverified is whether the printer wants HP's codes.
 #
 # Also not compared here: duplex. The reference reorders duplex pages host-side, rotating
 # every second one and padding an odd page count with a blank sheet, while we emit
@@ -123,8 +123,8 @@ def filter_command():
     if not os.path.exists(WASM_FILTER):
         raise SystemExit('build the filter first: ./scripts/build-native.sh, or the wasm\n'
                          'build for this machine: cargo build --target wasm32-wasip1 \\\n'
-                         '  -p p1102-filter --offline')
-    wt = os.environ.get('P1102_WASMTIME') or shutil.which('wasmtime')
+                         '  -p p1100-filter --offline')
+    wt = os.environ.get('P1100_WASMTIME') or shutil.which('wasmtime')
     if wt:
         return [wt, 'run', '--dir', '/', WASM_FILTER]
     return ['node', os.path.join(HERE, 'wasi-run.mjs'), WASM_FILTER]
@@ -238,7 +238,7 @@ def main(argv):
     cr = load('cupsraster')
     rehearse = load('rehearse-job')
 
-    work = args.keep or tempfile.mkdtemp(prefix='p1102-reference-')
+    work = args.keep or tempfile.mkdtemp(prefix='p1100-reference-')
     os.makedirs(work, exist_ok=True)
     print('comparing against the reference driver (foo2zjs)')
     print('work directory: %s' % work)

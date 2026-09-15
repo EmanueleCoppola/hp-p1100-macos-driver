@@ -279,7 +279,7 @@ def main(argv):
     args = ap.parse_args(argv)
 
     if args.selftest:
-        work = tempfile.mkdtemp(prefix='p1102-tone-')
+        work = tempfile.mkdtemp(prefix='p1100-tone-')
         try:
             data = synthetic(os.path.join(work, 'synthetic.table'))
             print('selftest: a synthetic table with the documented shape')

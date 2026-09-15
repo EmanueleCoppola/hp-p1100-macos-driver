@@ -47,7 +47,7 @@ classify() {
 if [ "$MODE" = processes ]; then
     echo "Processes in the print path:"
     found=0
-    for pat in cupsd cupsfilter p1102; do
+    for pat in cupsd cupsfilter p1100; do
         for pid in $(pgrep -f "$pat" 2>/dev/null || true); do
             arch=$(/usr/bin/arch -pid "$pid" 2>/dev/null || true)
             [ -n "$arch" ] || continue
@@ -123,15 +123,15 @@ if [ -n "$FILES" ]; then
     for f in $FILES; do check "$f"; done
 else
     echo "Our build artifacts:"
-    for b in "$REPO"/target/release/p1102 "$REPO"/target/release/p1102-filter; do
+    for b in "$REPO"/target/release/p1100 "$REPO"/target/release/p1100-filter; do
         if [ -x "$b" ]; then check "$b"; fi
     done
 
     echo "Installed:"
-    if [ -x /Library/Printers/p1102/p1102-filter ]; then
-        check /Library/Printers/p1102/p1102-filter
+    if [ -x /Library/Printers/p1100/p1100-filter ]; then
+        check /Library/Printers/p1100/p1100-filter
     else
-        echo "  nothing installed at /Library/Printers/p1102"
+        echo "  nothing installed at /Library/Printers/p1100"
     fi
 fi
 

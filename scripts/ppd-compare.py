@@ -30,7 +30,7 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
-INSTALL_DIR = '/Library/Printers/p1102'
+INSTALL_DIR = '/Library/Printers/p1100'
 FIXTURE = os.path.join(REPO, 'fixtures/inputs/text-1p.txt')
 
 # Both PPDs install.sh can generate from: the queue's, which is what this Mac has, and Apple's,
@@ -79,7 +79,7 @@ def sources():
 def generate(dst, src):
     """Run the installer's generator exactly the way install.sh calls it."""
     cmd = [sys.executable, os.path.join(HERE, 'make-ppd.py'), src,
-           INSTALL_DIR + '/p1102-filter', dst, '--icon', INSTALL_DIR + '/p1102.icns']
+           INSTALL_DIR + '/p1100-filter', dst, '--icon', INSTALL_DIR + '/p1100.icns']
     proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if proc.returncode != 0:
         raise SystemExit('make-ppd.py failed:\n' + proc.stderr.decode('utf-8', 'replace'))
@@ -102,7 +102,7 @@ def cups_raster(ppd, options, dst):
 def conformance(ppd):
     """CUPS's own conformance test, with its two file checks off, and only here.
 
-    Nothing is installed under /Library/Printers/p1102 while this runs, so the filter and the
+    Nothing is installed under /Library/Printers/p1100 while this runs, so the filter and the
     icon it complains about are not there yet; install.sh runs the same test strictly against
     the files once they are, which is where their permissions get checked too.
     """
@@ -121,11 +121,11 @@ def main(argv):
     ap.add_argument('--keep', help='keep the rasters in this directory')
     args = ap.parse_args(argv)
 
-    work = args.keep or tempfile.mkdtemp(prefix='p1102-ppd-')
+    work = args.keep or tempfile.mkdtemp(prefix='p1100-ppd-')
     failures = 0
     compared = 0
     for n, (src, label) in enumerate(sources()):
-        ours = os.path.join(work, 'p1102-%d.ppd' % n)
+        ours = os.path.join(work, 'p1100-%d.ppd' % n)
         size = generate(ours, src)
         with open(ours, 'rb') as f:
             first = f.readline().rstrip(b'\n')
