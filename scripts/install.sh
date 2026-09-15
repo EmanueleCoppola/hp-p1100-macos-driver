@@ -162,11 +162,12 @@ check_ppd() {
         die "the generated PPD changes lines it should not (above)"
     fi
 
-    # CUPS's own conformance test. A dry run cannot satisfy its two file checks, because
-    # nothing has been installed yet, so they are turned off with the documented -I flags there
-    # and only there; a real run reaches this point with root-owned copies already under $DEST
-    # and is judged strictly, which makes the filter's and the icon's permissions part of what
-    # is checked. Everything else - the option UI, the translations - is judged in both.
+    # CUPS's own conformance test. Its two file checks cannot pass before the install, and what
+    # they want is ownership rather than a mode: a copy of the filter at the mode this script
+    # installs (0755) in a temporary directory fails them, while HP's own root-owned files pass.
+    # So a dry run turns them off with the documented -I flags there and only there, and a real
+    # run reaches this point with root-owned copies under $DEST and is judged strictly.
+    # Everything else - the option UI, the translations - is judged in both.
     if [ -x /usr/bin/cupstestppd ]; then
         if [ "$DRY" = 1 ]; then
             report=$(/usr/bin/cupstestppd -I filters -I profiles "$ppd" 2>&1 || true)
