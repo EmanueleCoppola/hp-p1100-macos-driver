@@ -379,7 +379,9 @@ impl Encoder {
         if g.offset_y != 0 {
             items.push_u32(item::OFFSET_Y, g.offset_y);
         }
-        items.push_u32(item::NBIE, 1);
+        // ZJI_NBIE counts bi-level image entities, i.e. bit planes: one for the mono page the
+        // default path sends, two for the screened page HP's driver sends.
+        items.push_u32(item::NBIE, g.bits_per_pixel.max(1));
         items.push_u32(item::RESOLUTION_X, g.resolution_x);
         items.push_u32(item::RESOLUTION_Y, g.resolution_y);
         if g.ret {

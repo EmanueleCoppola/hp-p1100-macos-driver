@@ -498,6 +498,13 @@ Measured results are recorded in `docs/protocol.md`.
 a cross-check against real captured rasters; both agree, and both land exactly on EOF for
 1-, 2- and 3-page jobs, which is what validates the empirically derived header offsets.
 
+If the printer turns out to prefer what HP's own driver sends - two bits per pixel from a 12x12
+tone table, item 11 of `docs/differences.md` - the same backend invocation takes a two-bit job,
+and the README's "Making a two-bit page, the way HP's driver would" section is how it is built:
+the tone tables come out of the installed HP driver, the page is screened with them, and
+`p1102 wrap --bits 2` frames the two-plane image with the page items that depth implies. That
+job is the one thing that settles whether the printer wants it.
+
 ### Rehearsing the whole boundary in one command
 
 scripts/rehearse-job.py runs the pipeline the way CUPS will drive it, with no printer:

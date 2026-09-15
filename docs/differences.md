@@ -439,9 +439,11 @@ What matching it would take, and where it stands. The encoder is done: `p1102-jb
 in `scripts/jbig-sweep.py`, with goldens for a one-stripe and a two-stripe page in the crate's
 own tests.
 
-The conversion is the part that is described but not written: the table indexed by the grey
-value, four columns per byte, the row from the band's remaining line count, as above. It is
-checkable against the tables themselves, which `scripts/hp-tone-table.py` decodes and asserts.
+The conversion is implemented, in `scripts/hp-tone-table.py --convert`: it screens a CUPS
+raster into the two-bit pages this driver would have sent - the tables read out of the installed
+HP driver, the indexing and the row phase as above - and the README's recipe builds a whole job
+from those pages. What is not done is putting it in the filter, because that changes what the
+queue sends by default and it depends on the framing below being settled.
 
 The item side is small but not free: `PageGeometry` in `crates/p1102-protocol` carries a
 `bits_per_pixel` that `ZJI_VIDEO_BPP` and `ZJI_VIDEO_X` are computed from, but `mono()`
@@ -456,8 +458,9 @@ user's installed driver: `scripts/hp-tone-table.py --out DIR` writes them. And a
 framing would stop the queue printing, where a wrong tone curve only looks wrong, which is why
 the threshold stays until there is a device to try it on.
 
-So the compression is verified here already, the conversion is checkable against the tables
-themselves, and only the framing waits for the printer's own answer.
+So the compression is verified here and the conversion is written and checked against the
+tables, the page items follow from the depth, and only the framing's acceptance waits for the
+printer.
 
 One observation settles whether the two-bit difference matters in practice: print a graded fill
 or antialiased text and compare it with the same page through HP's queue while that still runs.

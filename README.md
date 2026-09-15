@@ -213,6 +213,26 @@ page and sits in the first twenty bytes:
 by the wrapper. The result is an ordinary job file, so it goes to the printer the same way any
 other one does.
 
+## Making a two-bit page, the way HP's driver would
+
+HP's driver screens grey into two bits per pixel through a 12x12 tone table (docs/differences.md
+item 11), and that page can be built here, which is how the difference gets settled on a printer:
+
+    PY=/opt/homebrew/bin/python3.13
+    $PY scripts/hp-tone-table.py --convert /tmp/1p.raster --pages /tmp/twobit
+    ./scripts/jbig-oracle.sh encode /tmp/twobit/page-1.pgm /tmp/twobit/page.jbg -b -p 28
+    dd if=/tmp/twobit/page.jbg bs=1 count=20 of=/tmp/twobit/page.bih
+    dd if=/tmp/twobit/page.jbg bs=1 skip=20 of=/tmp/twobit/page.bid
+    p1102 wrap --bih /tmp/twobit/page.bih --bid /tmp/twobit/page.bid \
+        --bits 2 --width 4900 --height 6400 -o /tmp/twobit/page.zjs
+
+The screening uses the tables out of the installed HP driver, so it is what that driver would
+have sent; the pages are written at the aligned width, and `-b` selects binary rather than
+Gray-coded words in the two planes, which a decoder has to be told because the BIE does not say.
+`--bits 2` is what makes the page items read `ZJI_VIDEO_BPP` 2, `ZJI_NBIE` 2 and
+`ZJI_VIDEO_X` = width/2, which is our reading of HP's own item emission and needs the printer
+to confirm.
+
 ## How the plan maps onto this repository
 
 The request had eleven phases. Where each one landed, and what its evidence is:
