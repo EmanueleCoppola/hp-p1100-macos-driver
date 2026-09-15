@@ -52,12 +52,26 @@ CASES = [
     # the same page size. B5JIS, EnvDL, A5, the 16K sizes and 8.5x13Custom all used to fall
     # through the table and be sent as Letter.
     ('a5', ['PageSize=A5'], '', ['-p', '11'], 'text-1p.txt'),
+    ('legal', ['PageSize=Legal'], '', ['-p', '5'], 'text-1p.txt'),
+    ('executive', ['PageSize=Executive'], '', ['-p', '7'], 'text-1p.txt'),
+    ('a6', ['PageSize=A6'], '', ['-p', '70'], 'text-1p.txt'),
     ('b5 jis', ['PageSize=B5JIS'], '', ['-p', '13'], 'text-1p.txt'),
+    ('envelope #10', ['PageSize=Env10'], '', ['-p', '20'], 'text-1p.txt'),
     ('envelope dl', ['PageSize=EnvDL'], '', ['-p', '27'], 'text-1p.txt'),
+    ('envelope c5', ['PageSize=EnvC5'], '', ['-p', '28'], 'text-1p.txt'),
     ('envelope iso b5', ['PageSize=EnvISOB5'], '', ['-p', '34'], 'text-1p.txt'),
+    ('monarch', ['PageSize=Monarch'], '', ['-p', '37'], 'text-1p.txt'),
+    ('postcard', ['PageSize=Postcard'], '', ['-p', '43'], 'text-1p.txt'),
     ('16k 197x273', ['PageSize=16K197x273mm'], '', ['-p', '257'], 'text-1p.txt'),
+    ('16k 184x260', ['PageSize=16K184x260mm'], '', ['-p', '263'], 'text-1p.txt'),
+    ('16k 195x270', ['PageSize=16K195x270mm'], '', ['-p', '264'], 'text-1p.txt'),
     ('8.5x13 custom', ['PageSize=8.5x13Custom'], '', ['-p', '258'], 'text-1p.txt'),
     ('double postcard', ['PageSize=DoublePostcard'], '', ['-p', '82'], 'text-1p.txt'),
+    # A page size the PPD does not list arrives as "Custom", which has its own code.
+    ('custom size', ['media=Custom.300x400'], '', ['-p', '256'], 'text-1p.txt'),
+    # The other resolution the PPD offers: CUPS puts 600x600 in the raster for both, so the
+    # job should be the same as the default case, and it is worth knowing if it is not.
+    ('600x600 resolution', ['Resolutions=600x600dpi'], '', ['-p', '1'], 'text-1p.txt'),
 ]
 
 # Not compared here: the media code. It reaches our filter in the raster header's

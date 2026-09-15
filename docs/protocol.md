@@ -214,9 +214,9 @@ entry that rests on an orientation convention rather than on a size, so it is **
 
 Eight of these names were missing from the first version of our table, and a job on A5,
 B5JIS, EnvDL, EnvISOB5, a 16K size or 8.5x13Custom would have been sent to the printer as
-Letter. The reference comparison is what caught it, and it now covers seven of these sizes
-end to end; `docs/differences.md` item 6 covers the media *type* codes, which are a separate
-matter.
+Letter. The reference comparison is what caught it, and it now compares every one of these
+sizes end to end, plus a custom size; `docs/differences.md` item 6 covers the media *type*
+codes, which are a separate matter.
 
 ## JBIG
 

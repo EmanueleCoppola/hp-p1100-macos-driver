@@ -232,10 +232,10 @@ the job-attribute line**, which carries the clock; a failure prints the differin
 name, because `scripts/zjs-compare.py` is what is doing the explaining.
 
 The case list covers print options (defaults, A4, econo mode, density, manual feed, copies,
-two pages) and page sizes other than Letter and A4 (A5, B5JIS, EnvDL, EnvISOB5, 16K197x273mm,
-8.5x13Custom, DoublePostcard). The page-size cases exist because the raster's page size name
-decides `ZJI_DMPAPER`, and comparing them is how eight names that our table did not carry -
-and which therefore went out as Letter - were found.
+two pages, both resolutions) and **every page size the PPD declares**, plus a custom one.
+The page-size cases exist because the raster's page size name decides `ZJI_DMPAPER`, and
+comparing them is how eight names that our table did not carry - and which therefore went out
+as Letter - were found.
 
 Two things are deliberately *not* in the case list, and both are recorded in
 `docs/differences.md`: duplex (the reference reorders and rotates pages host-side, we leave
