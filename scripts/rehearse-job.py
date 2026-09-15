@@ -268,6 +268,54 @@ def check_media_types(raster_path, work, cr, zc):
                                     for c in sorted(codes, key=lambda c: codes[c])))]
 
 
+# The option groups the filter consumes, and the ones whose effect CUPS has already put into
+# the raster page header by the time the filter runs. docs/differences.md item 10 has the
+# reasoning; this is the check that keeps the claim true. An argument can be made for a group
+# being in either list, but it cannot be in neither: that would be a setting the queue offers
+# and the printer never hears about, which is what the media source was before the PPD's own
+# default was read.
+FILTER_OPTIONS = ('Duplex', 'InputSlot', 'pjlDensity', 'pjlJamRecovery', 'EconoMode')
+RASTER_OPTIONS = ('PageSize', 'PageRegion', 'MediaType', 'Resolutions')
+
+
+def ppd_option_groups(path):
+    """The option groups a PPD declares, in the order it declares them."""
+    groups = []
+    with open(path, encoding='latin1') as f:
+        for line in f:
+            if not line.startswith('*OpenUI'):
+                continue
+            rest = line[len('*OpenUI'):].strip()
+            name = rest.lstrip('*').split('/')[0].strip()
+            if name and name not in groups:
+                groups.append(name)
+    return groups
+
+
+def check_ppd_option_coverage(ppd_path=None):
+    """No option the queue offers can silently do nothing.
+
+    Regenerating our PPD from a different HP PPD is the realistic way to break this - another
+    bundle in the family offers other slots and other groups - so the check runs against
+    whatever PPD is installed rather than against a list kept here.
+    """
+    path = ppd_path or PPD
+    if not os.path.exists(path):
+        return []
+    groups = ppd_option_groups(path)
+    if not groups:
+        raise Lever('%s declares no *OpenUI groups, so this check would prove nothing' % path)
+    unhandled = [g for g in groups if g not in FILTER_OPTIONS and g not in RASTER_OPTIONS]
+    if unhandled:
+        raise Lever('%s offers %s, and neither the filter nor the raster header carries them: '
+                    'a job that sets one would be accepted and ignored'
+                    % (path, ', '.join(unhandled)))
+    return ['%d option groups in %s, every one of them mapped by the filter (%s) or carried by '
+            'the raster header (%s)'
+            % (len(groups), path, ', '.join(g for g in groups if g in FILTER_OPTIONS),
+               ', '.join(g for g in groups if g in RASTER_OPTIONS))]
+
+
 def run_filter(raster_path, options, out_path, raw=False, env_overrides=None):
     overrides = {'P1102_RAW': '1'} if raw else {}
     if env_overrides:
@@ -485,6 +533,14 @@ def main(argv):
     print('  7. media type codes, every choice the installed PPD declares:')
     try:
         for line in check_media_types(raster_path, work, cr, zc):
+            print('       %s' % line)
+    except Lever as exc:
+        return fail(str(exc))
+
+    print()
+    print('  8. PPD option coverage, so no setting is accepted and ignored:')
+    try:
+        for line in check_ppd_option_coverage():
             print('       %s' % line)
     except Lever as exc:
         return fail(str(exc))
