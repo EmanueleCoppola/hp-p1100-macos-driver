@@ -86,8 +86,54 @@ def make_raster(text, out_path):
     return os.path.getsize(out_path)
 
 
-def run_filter(raster_path, options, out_path, raw=False):
+class Lever(Exception):
+    """An environment override that did not do what the bring-up notes claim."""
+
+
+def check_levers(raster_path, options, work, zc):
+    """Run the environment overrides the bring-up notes tell you to reach for.
+
+    Each is a diagnostic someone will type on the first hardware session, so each is run here
+    and its effect checked: a lever that quietly did nothing would waste that session, and
+    until now only P1102_RAW had ever been exercised.
+    """
+    lines = []
+
+    def job_with(overrides, name):
+        path = os.path.join(work, 'lever-%s.zjs' % name)
+        code, stderr, _ = run_filter(raster_path, options, path, env_overrides=overrides)
+        if code != 0:
+            raise Lever('the filter exited %d with %s: %s'
+                        % (code, ' '.join('%s=%s' % kv for kv in overrides.items()), stderr))
+        return open(path, 'rb').read()
+
+    job = job_with({'P1102_NO_PJL': '1'}, 'no-pjl')
+    if zc.semantic_view(job)['prologue'] or b'@PJL' in job or not job.startswith(zc.SYNC):
+        raise Lever('P1102_NO_PJL=1 did not remove the wrapper: the job should start at the '
+                    'JZJZ signature with no @PJL lines at all')
+    lines.append('P1102_NO_PJL=1: the job starts at the signature, with no wrapper')
+
+    job = job_with({'P1102_DENSITY': '5'}, 'density')
+    if b'@PJL SET DENSITY=5\n' not in job:
+        raise Lever('P1102_DENSITY=5 did not change the PJL density line')
+    lines.append('P1102_DENSITY=5: the prologue carries DENSITY=5')
+
+    job = job_with({'P1102_ECONOMODE': '1'}, 'econo')
+    pages = [e[1]['items'] for e in zc.semantic_view(job)['events']
+             if e[0] == 'chunk' and e[1]['op'] == 'START_PAGE']
+    if not pages or pages[0].get('ECONOMODE') != 1:
+        raise Lever('P1102_ECONOMODE=1 did not set the ECONOMODE item on the page')
+    if b'@PJL SET ECONOMODE=ON\n' not in job:
+        raise Lever('P1102_ECONOMODE=1 did not set the PJL line')
+    lines.append('P1102_ECONOMODE=1: the page item and the PJL line both say so')
+    lines.append('P1102_RAW=1: covered by the payload check when the rehearsal runs --raw')
+    return lines
+
+
+def run_filter(raster_path, options, out_path, raw=False, env_overrides=None):
     overrides = {'P1102_RAW': '1'} if raw else {}
+    if env_overrides:
+        overrides = dict(overrides, **env_overrides)
     prefix, route = filter_command(overrides)
     if route == 'native':
         cmd = prefix + ['1', 'manu', 'rehearsal', '1', options, raster_path]
@@ -99,18 +145,21 @@ def run_filter(raster_path, options, out_path, raw=False):
         proc = subprocess.run(cmd, stdout=dst, stderr=subprocess.PIPE, env=env)
     return proc.returncode, proc.stderr.decode('utf-8', 'replace').strip(), route
 
-def run_filter_on_stdin(raster_path, options, out_path):
+def run_filter_on_stdin(raster_path, options, out_path, raw=False):
     """The same job, with the raster on stdin and no input file argument.
 
     CUPS passes argv[6] for a filter chain, but the filter also accepts its input on stdin
     (it is how the tool is used by hand), and the two must produce the same bytes - a
     difference there would mean the streaming reader depends on it being seekable.
     """
-    prefix, route = filter_command()
+    overrides = {'P1102_RAW': '1'} if raw else {}
+    prefix, route = filter_command(overrides)
     cmd = prefix if route == 'native' else prefix + [WASM_FILTER]
     cmd = cmd + ['1', 'manu', 'rehearsal', '1', options]
+    env = dict(os.environ)
+    env.update(overrides)
     with open(raster_path, 'rb') as src, open(out_path, 'wb') as dst:
-        proc = subprocess.run(cmd, stdin=src, stdout=dst, stderr=subprocess.PIPE)
+        proc = subprocess.run(cmd, stdin=src, stdout=dst, stderr=subprocess.PIPE, env=env)
     return proc.returncode, proc.stderr.decode('utf-8', 'replace').strip()
 
 
@@ -222,7 +271,8 @@ def main(argv):
     # The other input route, checked against this one: the same raster on stdin, with no file
     # argument. Compared semantically because the JOBATTR stamp can differ by a second.
     stdin_path = os.path.join(work, 'stdin.zjs')
-    code, stdin_stderr = run_filter_on_stdin(raster_path, args.options, stdin_path)
+    code, stdin_stderr = run_filter_on_stdin(raster_path, args.options, stdin_path,
+                                             raw=args.raw)
     if code != 0:
         return fail('the filter exited %d when the raster arrives on stdin\n%s'
                     % (code, stdin_stderr))
@@ -278,6 +328,13 @@ def main(argv):
         if rc.returncode != 0:
             return fail('page %d: the decoded page does not match the raster' % n)
 
+    print()
+    print('  6. bring-up levers, the overrides the hardware notes tell you to reach for:')
+    try:
+        for line in check_levers(raster_path, args.options, work, zc):
+            print('       %s' % line)
+    except Lever as exc:
+        return fail(str(exc))
     print()
     print('rehearsal passed%s' % ('' if args.keep else ' (temporary files removed)'))
     if args.keep:

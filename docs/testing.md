@@ -401,10 +401,16 @@ and the result is judged by the reference decoder. A passing run:
 
     rehearsal passed
     1. cgpdftoraster (Apple, native) produced a 31361800 byte CUPS raster
-    2. our filter produced a 987 byte job
+    2. our native filter produced a 1043 byte job
+       the same job comes out with the raster on stdin
     3. chunk sequence: START_DOC START_PAGE JBIG_BIH JBIG_BID END_JBIG END_PAGE END_DOC
-    4. extracted the compressed image: 395 bytes (BIH 20 + body 375)
+    4. the job carries 1 compressed page image(s) for 1 raster page(s)
     5. reference decoder vs the independently computed bitmap: pixels identical (4992x6400, 3993600 bytes)
+    6. bring-up levers, the overrides the hardware notes tell you to reach for:
+       P1102_NO_PJL=1: the job starts at the signature, with no wrapper
+       P1102_DENSITY=5: the prologue carries DENSITY=5
+       P1102_ECONOMODE=1: the page item and the PJL line both say so
+       P1102_RAW=1: covered by the payload check when the rehearsal runs --raw
 
 It covers the things that are easy to get wrong and hard to notice: that the filter reads
 its raster from stdin as well as from a file argument, that PPD options reach both the page
@@ -417,6 +423,7 @@ generated one. Each case below was judged by the reference decoder:
 | generated one-page Letter raster | passes |
 | PPD options: duplex, manual feed, econo mode, density, jam recovery | passes, and the 13 expected semantic changes appear |
 | raster on stdin instead of a file argument | identical job |
+| the four bring-up overrides: no PJL, density, econo mode, raw | each changes the job the way the hardware notes say it does |
 | captured two-page raster, 62 MB | both pages decode to the expected bitmaps |
 | captured three-page raster, 94 MB | all three pages decode to the expected bitmaps |
 | uncompressed path on the three-page raster | all three payloads match, each with its own ink count |
