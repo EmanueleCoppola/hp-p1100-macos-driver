@@ -102,22 +102,45 @@ The rest of the wrapper we emit matches HP's in substance: density, econo mode, 
 recovery, resolution enhancement, and the unsolicited status requests are all the same
 settings, driven by the same PPD options.
 
-## 2. The JBIG options now match HP's byte; the adaptive template may not. UNKNOWN
+## 2. The JBIG options match HP's, adaptive template included. CONFIRMED
 
-This entry has been rewritten: we no longer emit a simpler configuration. Our BIH carries
-`options = 0x5c` (DPON | TPBON | TPDON | LRLTWO) with typical prediction implemented, and
-`order = 3`, `L0 = 128`, `MX = 0`. That is exactly the configuration the reference driver
-sends, and it is also HP's: disassembling `jbig::ZjbigEncoder`'s constructor in
-`rastertozjs` shows `movb $0x5c, 0x93(%rbx)` and `movb $0x3, 0x92(%rbx)` - the two bytes
-`getBIH` copies into BIH offsets 19 and 18.
+Our BIH carries `options = 0x5c` (DPON | TPBON | TPDON | LRLTWO), `order = 3`, `L0 = 128`
+and `MX = 0`, and it is byte-identical to the reference driver's for every case in
+`scripts/reference-compare.py`. The same configuration is readable in HP's binary, and so is
+the part of it that used to be guesswork: the adaptive template.
 
-What is left is the adaptive template: HP's constructor seeds that field with `0x10` (16)
-and reads it back from `atmove`, `minAtMove` and `maxAtMove` properties in
-`zjs::JbigBandWriter::start`, so HP's stream may move the template pixel; the reference
-driver forces `MX = 0` for this model family, and we match the reference. A stream that
-announces `MX = 0` never moves the pixel, which every decoder must accept, so the residual
-risk is only that the printer's decoder handles *fewer* cases than HP's driver uses - the
-converse of the usual worry.
+`jbig::ZjbigEncoder::start` configures its encoder from four getters on the wrapper, through a
+call that is HP's version of jbigkit's own `jbg_enc_options(s, order, options, l0, mx, my)` -
+the parameter order and the clamp rules are the same (the state's `mx` is stored only when it
+is at most 127, `my` only when at most 255). The values are the wrapper's fields:
+
+| argument | getter, and the field it returns | value here |
+|---|---|---|
+| `order` | `getOrderBits`, the byte at 0x92 | 3 |
+| `options` | `getOptionBits`, 0x93 | 0x5c |
+| `l0` | `getStripeSize`, 0x8c (the band writer's stripes, 128) | 128 |
+| `mx` | `getAtMove`, 0x94 | **0** |
+| `my` | passed as a constant | 0 |
+
+`mx` is the ATMOVE window, and it is 0 because `atmove` is: the band writer's constructor
+initialises it to 0 (`movl $0x0, 0xc4(%rdi)`), `JbigBandWriter::start` reads it from the
+*job's* `atmove`, `minAtMove` and `maxAtMove` keys with defaults of 0, `jbig::AbstractEncoder::
+setAtMove` maps a move of 0 to a window of 0 and otherwise clamps into `min..max` (defaults 5
+and 128), and nothing in HP's driver adds those keys: the only references to those names
+anywhere in the binary are the reads in `start` and one other applying helper, and the PPD
+declares no such option. `setTemplate` - the only other thing that touches the adaptive
+template - merely toggles the options byte's `LRLTWO` bit (`0x40`), which is what the
+`template` 2-or-3 property means; it never moves `mx`.
+
+So the question this entry used to leave open is answered: **HP's driver does not move the
+adaptive template for a job it produced, and neither do we.** The 0x10 that the constructor
+stores (`movb $0x10, 0x90(%rbx)`) is a byte of the wrapper's *own* BIH buffer, a different
+field from the encoder's `mx`, and the encoder - which is what writes the stream - is
+configured with 0. If the stream's MX byte were taken from that buffer instead of from the
+encoder, HP would announce `MX = 16` where we announce `MX = 0`; both decode, because MX is
+only the *maximum* ATMOVE window and a stream that never signals a move is handled by any
+decoder that implements the standard. Ours claims the least, and it is what the reference
+sends, so that is what we keep.
 
 The typical-prediction work is verified byte for byte: the encoder reproduces
 `pbmtojbg -p 92 -m 0 -s 128 -o 3` exactly, across the sweep in `scripts/jbig-sweep.py` and
@@ -395,7 +418,7 @@ Each one maps to an observation the hardware test makes:
 | item | what to look for |
 |---|---|
 | 1, PJL wrapper | if nothing prints at all, this is the first suspect; resending the same payload with `P1102_NO_PJL=1` separates a wrapper problem from an image problem |
-| 2, JBIG adaptive template | a page that prints but is corrupt or truncated points here, since the framing, the coder and the typical-prediction path are all byte-verified against the reference |
+| 2, JBIG configuration | settled, and not a suspect: the options, the order, L0 and the adaptive template all match what HP's encoder is configured with, and the compressed image is byte-identical to the reference's. A corrupt or truncated page would point at the framing or at the printer's own decoder |
 | 4, command path | absent supplies reporting is visible in the print dialog, not in printing |
 | 5, duplex | send a two-page job with `Duplex=DuplexNoTumble`: the printer should prompt to flip the stack ("press the Go button"), and the back of each sheet should be the right way up, which CUPS's rotation has already arranged. Single-sided output with no prompt would mean the job needs host-side page *pairing*, not rotation |
 | 6, media codes | whether a non-plain-paper job prints correctly, or jams or misfeeds |
