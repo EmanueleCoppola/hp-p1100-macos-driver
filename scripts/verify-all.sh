@@ -71,7 +71,8 @@ if [ "$QUICK" = 1 ]; then
     echo '  (skipped: the comparison and the sweep, as --quick asks)'
 else
     run 'whole job vs the reference driver' "$PY" scripts/reference-compare.py
-    run 'JBIG encoder vs the reference' "$PY" scripts/jbig-sweep.py
+run 'JBIG encoder vs the reference' "$PY" scripts/jbig-sweep.py
+run 'two-bit path vs the reference' "$PY" scripts/two-bit-compare.py
 fi
 echo
 echo 'the CUPS boundary, and the shape of the install:'

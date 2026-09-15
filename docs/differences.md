@@ -439,10 +439,14 @@ What matching it would take, and where it stands. The encoder is done: `p1102-jb
 in `scripts/jbig-sweep.py`, with goldens for a one-stripe and a two-stripe page in the crate's
 own tests.
 
-The conversion is implemented, in `scripts/hp-tone-table.py --convert`: it screens a CUPS
-raster into the two-bit pages this driver would have sent - the tables read out of the installed
-HP driver, the indexing and the row phase as above - and the README's recipe builds a whole job
-from those pages. What is not done is putting it in the filter, because that changes what the
+The conversion is implemented twice over, once in `scripts/hp-tone-table.py --convert` and
+once in the library (`p1102_raster::to_two_bit_planes`, reachable as
+`p1102 raster-to-zjs --2bit --tone-table FILE`), and the two are held together by
+`scripts/two-bit-compare.py`: the same page built through our conversion, our two-plane encoder
+and our framing, and through the tool plus the reference encoder, has to come out the same job.
+That check earned its keep immediately - it caught the aligned columns past the page width being
+padded black rather than white, where the one-bit path's padding is white and a zeroed two-bit
+margin is not. What is still not done is putting it in the filter, because that changes what the
 queue sends by default and it depends on the framing below being settled.
 
 The item side is small but not free: `PageGeometry` in `crates/p1102-protocol` carries a
