@@ -211,6 +211,9 @@ Verified by execution, on real captured data where it matters:
   `sides=` one), `InputSlot=Manual` to the tray code, `pjlDensity` clamped to the 1..5 the
   PPD offers, `EconoMode` and `pjlJamRecovery`, and the raster's `cupsMediaType` forwarded
   as the media code. Unrecognised keys and values are ignored rather than guessed.
+  Options a job does not name are taken from the PPD, the way CUPS's filter interface expects
+  and the way HP's driver does it: CUPS passes only what the user changed, so the file's
+  `*Default*` keywords fill the rest and the command line overrides them.
 - The job builder and the JBIG oracle: all eight deterministic test pages build, walk back
   with the expected chunk sequence, and round-trip their compressed image through the
   JBIG_BIH / JBIG_BID split unchanged.

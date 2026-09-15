@@ -190,45 +190,79 @@ pub fn apply_ppd_options(opts: &mut Options, options: &str) {
             Some(kv) => kv,
             None => continue,
         };
-        match key {
-            // IPP spelling
-            "sides" => match value {
-                "two-sided-long-edge" => opts.duplex = zduplex::LONG_EDGE,
-                "two-sided-short-edge" => opts.duplex = zduplex::SHORT_EDGE,
-                "one-sided" => opts.duplex = zduplex::OFF,
-                _ => {}
-            },
-            // PPD spelling
-            "Duplex" => match value {
-                "DuplexNoTumble" => opts.duplex = zduplex::LONG_EDGE,
-                "DuplexTumble" => opts.duplex = zduplex::SHORT_EDGE,
-                "None" => opts.duplex = zduplex::OFF,
-                _ => {}
-            },
-            "InputSlot" => match value {
-                "Manual" => opts.source = source::MANUAL,
-                "Upper" | "OnlyOne" => opts.source = source::ONLY_ONE,
-                "Lower" => opts.source = source::LOWER,
-                "Middle" => opts.source = source::MIDDLE,
-                "Envelope" => opts.source = source::ENVELOPE,
-                "Auto" => opts.source = source::AUTO,
-                _ => {}
-            },
-            "pjlDensity" => {
-                if let Ok(v) = value.parse::<u32>() {
-                    // the PPD offers 1..5; ignore anything outside that range
-                    if (1..=5).contains(&v) {
-                        opts.density = v;
-                    }
-                }
-            }
-            "EconoMode" => opts.econo_mode = is_true(value),
-            "pjlJamRecovery" => opts.jam_recovery_auto = is_true(value),
-            _ => {}
-        }
+        apply_one_option(opts, key, value);
     }
 }
 
+/// Apply one `key=value` pair, from CUPS's options string or from a PPD default.
+fn apply_one_option(opts: &mut Options, key: &str, value: &str) {
+    match key {
+        // IPP spelling
+        "sides" => match value {
+            "two-sided-long-edge" => opts.duplex = zduplex::LONG_EDGE,
+            "two-sided-short-edge" => opts.duplex = zduplex::SHORT_EDGE,
+            "one-sided" => opts.duplex = zduplex::OFF,
+            _ => {}
+        },
+        // PPD spelling
+        "Duplex" => match value {
+            "DuplexNoTumble" => opts.duplex = zduplex::LONG_EDGE,
+            "DuplexTumble" => opts.duplex = zduplex::SHORT_EDGE,
+            "None" => opts.duplex = zduplex::OFF,
+            _ => {}
+        },
+        "InputSlot" => match value {
+            "Manual" => opts.source = source::MANUAL,
+            "Upper" | "OnlyOne" => opts.source = source::ONLY_ONE,
+            "Lower" => opts.source = source::LOWER,
+            "Middle" => opts.source = source::MIDDLE,
+            "Envelope" => opts.source = source::ENVELOPE,
+            "Auto" => opts.source = source::AUTO,
+            _ => {}
+        },
+        "pjlDensity" => {
+            if let Ok(v) = value.parse::<u32>() {
+                // the PPD offers 1..5; ignore anything outside that range
+                if (1..=5).contains(&v) {
+                    opts.density = v;
+                }
+            }
+        }
+        "EconoMode" => opts.econo_mode = is_true(value),
+        "pjlJamRecovery" => opts.jam_recovery_auto = is_true(value),
+        _ => {}
+    }
+}
+
+/// Apply the PPD's own defaults for the options this filter maps, before the command line.
+///
+/// CUPS passes only the options the job actually named: filter(7) says so outright - "options
+/// passed on the command-line typically do not include the default choices [of] the printer's
+/// PPD file" - and points a filter at `PPD` in the environment and at `ppdMarkDefaults` plus
+/// `ppdFindMarkedChoice` to fill the gaps. HP's driver does exactly that; its imports are how
+/// we know. Without it, a job that names no options - the common case, since CUPS sends only
+/// what the user changed - would send our defaults rather than the printer's configured ones.
+///
+/// On this printer that is one item: the PPD's `*DefaultInputSlot` is `Manual`, so the media
+/// source is 4 rather than the 1 we used to assume. The other defaults here agree with ours.
+pub fn apply_ppd_defaults(opts: &mut Options, ppd: &str) {
+    for line in ppd.lines() {
+        let Some(rest) = line.strip_prefix("*Default") else {
+            continue;
+        };
+        let Some((key, value)) = rest.split_once(':') else {
+            continue;
+        };
+        // Only the options this filter maps; the rest of the PPD - page size, media type,
+        // resolution - reaches us through the raster page header, which already reflects them.
+        if matches!(
+            key,
+            "InputSlot" | "Duplex" | "EconoMode" | "pjlDensity" | "pjlJamRecovery"
+        ) {
+            apply_one_option(opts, key, value.trim().trim_matches('"'));
+        }
+    }
+}
 /// Page geometry for one raster page.
 pub fn geometry(header: &PageHeader, opts: &Options) -> PageGeometry {
     let mut g = PageGeometry::mono(
@@ -1145,6 +1179,53 @@ mod tests {
         };
         let bare = encode_raster_job(&r, &opts).unwrap();
         assert_eq!(&bare[..4], STREAM_SIGNATURE);
+    }
+
+    /// CUPS sends only the options a job named, so a filter has to read the PPD for the rest.
+    /// HP's driver does exactly that; this is the same thing, for the options we map.
+    #[test]
+    fn ppd_defaults_fill_in_what_the_command_line_leaves_out() {
+        let ppd = "\
+*DefaultColorSpace: Gray
+*DefaultPageSize: Letter
+*DefaultDuplex: None
+*DefaultInputSlot: Manual
+*DefaultpjlDensity: 3
+*DefaultpjlJamRecovery: False
+*DefaultEconoMode: False
+*DefaultFont: Courier
+";
+        let mut o = Options::default();
+        apply_ppd_defaults(&mut o, ppd);
+        // Manual is the one that differs from our built-in default, and so the one whose
+        // absence was a real difference from HP's driver.
+        assert_eq!(o.source, source::MANUAL);
+        assert_eq!(o.duplex, zduplex::OFF);
+        assert_eq!(o.density, 3);
+        assert!(!o.econo_mode);
+        assert!(!o.jam_recovery_auto);
+
+        // The command line is applied after the file, so it wins.
+        apply_ppd_options(&mut o, "InputSlot=Upper pjlDensity=5");
+        assert_eq!(o.source, source::ONLY_ONE);
+        assert_eq!(o.density, 5);
+    }
+
+    /// Only the options we map are read: page size, media type and resolution reach us in the
+    /// raster page header, which already reflects the PPD's defaults for them.
+    #[test]
+    fn ppd_defaults_ignore_the_keywords_we_do_not_map() {
+        let mut o = Options::default();
+        apply_ppd_defaults(
+            &mut o,
+            "*DefaultPageSize: A4\n*DefaultResolutions: 600x600dpi\n",
+        );
+        let d = Options::default();
+        assert_eq!(o.source, d.source);
+        assert_eq!(o.duplex, d.duplex);
+        assert_eq!(o.density, d.density);
+        assert_eq!(o.econo_mode, d.econo_mode);
+        assert_eq!(o.jam_recovery_auto, d.jam_recovery_auto);
     }
 
     #[test]

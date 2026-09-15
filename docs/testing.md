@@ -231,6 +231,11 @@ bitmaps with the equivalent flags. The pass condition is **byte identity after r
 the job-attribute line**, which carries the clock; a failure prints the differing items by
 name, because `scripts/zjs-compare.py` is what is doing the explaining.
 
+Our side also has `PPD` set to the installed PPD, because CUPS sets it for a real job and the
+filter reads the defaults the job does not name from it: the reference is given the same
+choices as flags, so a default the filter failed to pick up would show as a difference rather
+than pass unnoticed.
+
 That line's *value* is expected to differ - ours is UTC and the reference's is local time, two
 hours apart here - so the harness removes it and then checks that both jobs still carry a
 fourteen-digit one, and prints both stamps. A regression in the format would otherwise hide
@@ -452,6 +457,7 @@ included, was run with the native binary moved aside, and the wasm build carried
 | raster with no pages | filter exits 1, no output |
 | raster truncated mid-page | filter exits 1, naming the page and the shortfall |
 | a hand invocation with fewer than seven arguments, and `--help` | exits 2 with the usage text on stderr, or 0 with it on stdout, and writes no job either way |
+| `PPD` set in the environment, which is how CUPS passes the queue's PPD | the media source becomes the PPD's default (Manual, 4), and an explicit `InputSlot` on the command line still overrides it |
 
 ### What the rehearsal does not cover, and why
 
