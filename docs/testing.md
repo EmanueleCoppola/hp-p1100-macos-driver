@@ -117,10 +117,10 @@ without it, not as a replacement for it.
 
 `scripts/test-native.sh` runs the whole suite on aarch64-apple-darwin - the real target -
 using Apple's toolchain, or Xcode's clang passed to rustc as the linker when the licence has
-not been accepted. All 76 tests pass on both routes:
+not been accepted. Both routes run the same suite:
 
 ```bash
-./scripts/test-native.sh                 # native, 76 tests
+./scripts/test-native.sh                 # native; the same suite test-wasm.sh runs
 ./scripts/test-native.sh -p p1102-jbig   # anything cargo test takes
 ```
 

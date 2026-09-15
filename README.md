@@ -91,7 +91,7 @@ CUPS and without a printer.
     ./scripts/test-wasm.sh         # the same suite on wasm, for a machine with no linker
     ./scripts/build-native.sh      # the real native ARM64 binaries
 
-`scripts/test-native.sh` runs the 76 tests on aarch64-apple-darwin, which is the real target;
+`scripts/test-native.sh` runs the whole suite on aarch64-apple-darwin, which is the real target;
 it links with Apple's toolchain, or with Xcode's clang called directly when the licence has
 not been accepted. `scripts/test-wasm.sh` runs the identical suite on wasm32-wasip1, which
 links with Rust's own bundled linker and needs no SDK, so it works even with no native
