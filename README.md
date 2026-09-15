@@ -9,7 +9,11 @@ compressor and a CUPS filter wired end to end. All of it is tested, and the job 
 writes is **byte-identical to the reference driver's** - wrapper, framing, item sets,
 geometry, compressed image and padding - for every option combination
 `scripts/reference-compare.py` covers; the compressed image is separately byte-identical to
-the reference encoder of the standard. **Nothing has been validated on hardware yet** -
+the reference encoder of the standard. The two-bit path HP's own driver uses for this printer is
+built too - its tone tables read out of the installed driver, the screening rule read out of its
+code, and the whole page checked against the reference encoder by `scripts/two-bit-compare.py` -
+behind an option, with the one-bit path still the default. **Nothing has been validated on
+hardware yet** -
 the printer has never been attached during this work.
 
 scripts/make-test-job.py builds complete, reference-correct ZjStream jobs independently of

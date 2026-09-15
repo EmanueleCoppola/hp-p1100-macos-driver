@@ -468,6 +468,8 @@ What each result tells you:
 | it prints but the image is inverted | the ink polarity is the wrong way round; `1` is currently ink, following the reference implementation's plane convention |
 | it prints the wrong size or is sheared | the geometry or the row stride is wrong, which the `RASTER_X` versus aligned-width distinction in `docs/protocol.md` explains |
 | a two-sided job prints single-sided, in document order, with no prompt | duplex needs the host-side page handling the other two drivers have; see item 5 of `docs/differences.md`, which also says what to try |
+| a two-bit job prints as a negative | the four levels are the right way round in the tables but the printer wants them inverted in the planes; item 11 of `docs/differences.md` has the reading and what it rests on |
+| a two-bit job prints a black stripe down the right-hand side | the aligned columns past the page width are not the lightest level; that was a real defect here, caught by `scripts/two-bit-compare.py`, so seeing it again would mean the padding moved |
 
 `scripts/make-test-job.py` compresses with the **reference** encoder by default. That is
 deliberate: if a page fails to print, a reference-quality payload has already ruled out our
@@ -501,9 +503,12 @@ a cross-check against real captured rasters; both agree, and both land exactly o
 If the printer turns out to prefer what HP's own driver sends - two bits per pixel from a 12x12
 tone table, item 11 of `docs/differences.md` - the same backend invocation takes a two-bit job,
 and the README's "Making a two-bit page, the way HP's driver would" section is how it is built:
-the tone tables come out of the installed HP driver, the page is screened with them, and
-`p1102 wrap --bits 2` frames the two-plane image with the page items that depth implies. That
-job is the one thing that settles whether the printer wants it.
+the tone tables come out of the installed HP driver, the page is screened with them, and the
+image is framed with the page items that depth implies. One command does all of it -
+`p1102 raster-to-zjs RASTER OUT.zjs --2bit --tone-table /tmp/twobit/sdtahs10.bin` - and the
+longer recipe in the README, which uses the reference encoder as well, is what
+`scripts/two-bit-compare.py` holds that command to. That job is the one thing that settles
+whether the printer wants it.
 
 ### Rehearsing the whole boundary in one command
 
