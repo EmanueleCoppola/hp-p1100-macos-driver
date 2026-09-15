@@ -19,16 +19,46 @@ Dropped (no equivalent yet, so CUPS must not try to run them):
 Relabelled:
   *NickName gains a suffix so the queue is distinguishable in the UI.
 
+Added:
+  *OpenUI *p1102Grey, the two-bit grey screening option, with a label for every language the
+  source PPD declares - CUPS's own conformance test fails a PPD with an untranslated option
+  once the file declares languages at all.
+
+Order matters at the top of the file: *PPD-Adobe has to be the first line. Everything this
+script adds lands after it, because cupstestppd rejects the whole file when a comment comes
+first ("Illegal whitespace character on line 1"), and CUPS then quietly falls back to its
+built-in conversion rules - a queue that prints the wrong raster rather than refusing the job.
+
 Usage:
     python3 scripts/make-ppd.py <source.ppd[.gz]> <filter-path> <out.ppd>
                                 [--suffix " (native ARM64)"] [--icon PATH.icns]
 """
 
 import gzip
+import re
 import sys
 
 # HP filter basenames we must stop CUPS from invoking.
 HP_FILTERS = ('rastertozjs', 'usbink', 'rasterToHPZJS', 'commandToHPZJS')
+
+# The labels for that option, per language. English is the file's own language and needs no
+# *en. lines; every other language *cupsLanguages names does.
+GREY_LABELS = {
+    'en': ('Grey Screening', 'One bit, thresholded', 'Two bits, screened'),
+    'da': ('Gråtoning', 'Én bit, tærskelværdi', 'To bit, screenet'),
+    'de': ('Graustufenraster', 'Ein Bit, Schwellenwert', 'Zwei Bit, gerastert'),
+    'es': ('Tramado de grises', 'Un bit, umbral', 'Dos bits, tramado'),
+    'fi': ('Harmaan seulonta', 'Yksi bitti, kynnysarvo', 'Kaksi bittiä, seulonta'),
+    'fr': ('Tramage des gris', 'Un bit, seuil', 'Deux bits, tramé'),
+    'it': ('Retinatura dei grigi', 'Un bit, soglia', 'Due bit, retinato'),
+    'ko': ('회색 스크리닝', '1비트, 임계값', '2비트, 스크린'),
+    'nl': ('Grijstintenraster', 'Eén bit, drempelwaarde', 'Twee bits, gerasterd'),
+    'no': ('Gråtoning', 'Én bit, terskelverdi', 'To bit, screenet'),
+    'pt': ('Rastreio de cinzentos', 'Um bit, limite', 'Dois bits, rastreado'),
+    'sv': ('Gråskalning', 'En bit, tröskelvärde', 'Två bitar, skärmad'),
+    'zh_CN': ('灰度加网', '一位，阈值', '两位，加网'),
+    'zh_TW': ('灰階網點', '一位元，臨界值', '兩位元，網點'),
+}
 
 
 def read_maybe_gz(path):
@@ -41,6 +71,56 @@ def read_maybe_gz(path):
         return f.read()
 
 
+def languages(stripped):
+    """The languages the source PPD localises for, in the order it names them.
+
+    *cupsLanguages is the declaration CUPS itself reads, so it is the one to follow; the
+    *ll.-prefix scan is the fallback for a PPD that carries translations without declaring
+    them. Language codes are the lowercase names there, which is what keeps this from
+    collecting keywords such as *cupsLanguages itself.
+    """
+    for raw in stripped:
+        line = raw.decode('latin1')
+        if line.startswith('*cupsLanguages'):
+            declared = line.split(':', 1)[1].strip().strip('"').split()
+            if declared:
+                return declared
+    seen = []
+    for raw in stripped:
+        m = re.match(r'\*([a-z]{2}(?:_[A-Z]{2})?)\.', raw.decode('latin1'))
+        if m and m.group(1) not in seen:
+            seen.append(m.group(1))
+    return seen
+
+
+def screening(langs):
+    """The grey-screening group, with a label in every language the source PPD declares.
+
+    The labels are not decoration: once a PPD declares languages, cupstestppd fails it for
+    every option and every choice that has no translation in each of them - one FAIL line
+    per language per name. English is the language of the file itself and needs no *en. lines.
+    """
+    lines = [
+        '*%%',
+        '*%% Grey screening, added by p1102-drivers: Mono1 thresholds, Screened2 screens the',
+        '*%% page through the printer-specific tone tables the installer puts beside the filter.',
+        '*OpenUI *p1102Grey/Grey Screening: PickOne',
+        '*OrderDependency: 10 AnySetup *p1102Grey',
+        '*Defaultp1102Grey: Mono1',
+        '*p1102Grey Mono1/One bit, thresholded: ""',
+        '*p1102Grey Screened2/Two bits, screened: ""',
+    ]
+    for lang in langs:
+        if lang == 'en':
+            continue
+        option, mono, screened = GREY_LABELS.get(lang, GREY_LABELS['en'])
+        lines.append('*%s.Translation p1102Grey/%s: ""' % (lang, option))
+        lines.append('*%s.p1102Grey Mono1/%s: ""' % (lang, mono))
+        lines.append('*%s.p1102Grey Screened2/%s: ""' % (lang, screened))
+    lines.append('*CloseUI: *p1102Grey')
+    return lines
+
+
 def rewrite(data, filter_path, suffix, icon_path=None):
     crlf = b'\r\n' in data
     eol = b'\r\n' if crlf else b'\n'
@@ -49,6 +129,7 @@ def rewrite(data, filter_path, suffix, icon_path=None):
     stripped = [ln[:-1] if ln.endswith(b'\r') else ln for ln in lines]
 
     out = []
+    adobe = None
     added = None
     icon_line = '*APPrinterIconPath: "%s"' % icon_path if icon_path else None
     icon_written = False
@@ -57,6 +138,15 @@ def rewrite(data, filter_path, suffix, icon_path=None):
     for raw in stripped:
         line = raw.decode('latin1')
         low = line.lower()
+
+        # *PPD-Adobe is line 1 of a PPD or the file is malformed. It is held back here and
+        # written first, ahead of everything this script adds, because a PPD whose first line
+        # is a comment is one CUPS cannot open at all - and cupsfilter then silently falls back
+        # to its built-in conversion rules, so the failure surfaces as a wrong raster rather
+        # than as an error. See docs/testing.md for the measurement.
+        if low.startswith('*ppd-adobe') and adobe is None:
+            adobe = line
+            continue
 
         # Localised names are keyed by the NickName string, so they have to follow it or
         # the UI silently falls back to untranslated text.
@@ -108,9 +198,6 @@ def rewrite(data, filter_path, suffix, icon_path=None):
         if line.startswith('*ShortNickName'):
             out.append(line)
             continue
-        if low.startswith('*ppd-adobe') and not out:
-            out.append(line)
-            continue
         out.append(line)
 
     if added is None:
@@ -123,19 +210,16 @@ def rewrite(data, filter_path, suffix, icon_path=None):
     # The one option that is ours rather than HP's: the two-bit grey screening this driver can
     # do and HP's PPD has no way to ask for (docs/differences.md item 11). Mono1 is the default,
     # so a queue that sets nothing sends exactly what the reference driver sends.
-    screening = [
-        '*%%',
-        '*%% Grey screening, added by p1102-drivers: Mono1 thresholds, Screened2 screens the',
-        '*%% page through the printer-specific tone tables the installer puts beside the filter.',
-        '*OpenUI *p1102Grey/Grey Screening: PickOne',
-        '*OrderDependency: 10 AnySetup *p1102Grey',
-        '*Defaultp1102Grey: Mono1',
-        '*p1102Grey Mono1/One bit, thresholded: ""',
-        '*p1102Grey Screened2/Two bits, screened: ""',
-        '*CloseUI: *p1102Grey',
-    ]
-    body = header + screening + out
-    result = eol.join(l.encode('latin1') for l in body)
+    # When the source declares no *PPD-Adobe at all, one is written rather than leaving the
+    # file malformed; both PPDs this is meant for have it, so this only ever fires on a source
+    # nothing else would accept either.
+    body = [adobe.encode('latin1') if adobe else b'*PPD-Adobe: "4.3"']
+    # Our own lines are ASCII apart from the translations, which go out as UTF-8 - the same way
+    # the source PPD stores its own Korean and Chinese labels. Source lines round-trip byte for
+    # byte through latin1, which is why they are not re-encoded the same way.
+    body += [l.encode('utf-8') for l in header + screening(languages(stripped))]
+    body += [l.encode('latin1') for l in out]
+    result = eol.join(body)
     # Preserve whether the source ended with a newline rather than always adding one.
     if data.endswith(b'\n'):
         result += eol
