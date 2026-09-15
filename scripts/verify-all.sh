@@ -76,6 +76,7 @@ echo 'the CUPS boundary, and the shape of the install:'
 run 'rehearsal, JBIG path' "$PY" scripts/rehearse-job.py
 run 'rehearsal, uncompressed path' "$PY" scripts/rehearse-job.py --raw
 run 'rehearsal, with PPD options' "$PY" scripts/rehearse-job.py --options 'Duplex=DuplexNoTumble InputSlot=Manual EconoMode=True pjlDensity=5 pjlJamRecovery=True'
+run 'peak memory does not grow with the job' "$PY" scripts/memory-check.py
 run 'PPD the installer would write' ./scripts/install.sh --dry-run
 run 'uninstall, dry run' ./scripts/uninstall.sh --dry-run
 echo
