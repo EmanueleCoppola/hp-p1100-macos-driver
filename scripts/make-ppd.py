@@ -127,7 +127,6 @@ def rewrite(data, filter_path, suffix, icon_path=None):
         '*%%',
         '*%% Grey screening, added by p1102-drivers: Mono1 thresholds, Screened2 screens the',
         '*%% page through the printer-specific tone tables the installer puts beside the filter.',
-        '*%% page through the printer-specific tone tables the installer puts beside the filter.',
         '*OpenUI *p1102Grey/Grey Screening: PickOne',
         '*OrderDependency: 10 AnySetup *p1102Grey',
         '*Defaultp1102Grey: Mono1',
