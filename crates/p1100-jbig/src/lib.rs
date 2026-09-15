@@ -25,7 +25,7 @@
 //! implementation has to contain, not copied implementation code.
 //!
 //! Scope is deliberately narrow: one bit plane, one resolution layer, no adaptive template
-//! movement, no differential layers. The P1102 path needs nothing more.
+//! movement, no differential layers. The pages this driver sends need nothing more.
 
 /// Lines per stripe. The value the reference implementation uses for this printer family.
 pub const DEFAULT_L0: u32 = 128;

@@ -1,6 +1,8 @@
 //! Zenographics ZjStream (ZJS) encoder for HP host-based LaserJets.
 //!
-//! Target device: HP LaserJet Professional P1102 (the `hp1100` PPD family).
+//! Target family: the HP LaserJet Professional P1100 series, which HP's own driver describes
+//! with one `hp1100` PPD for the whole series. The P1102 is the model this implementation
+//! was reverse-engineered and verified against.
 //! Format documentation: `docs/protocol.md`.
 //!
 //! The encoder is pure: it writes into an in-memory buffer and never touches a
@@ -61,7 +63,7 @@ pub mod item {
     pub const ECONOMODE: u16 = 23;
 
     /// Minolta/OEM extension tags, kept because the reference encoder emits them for
-    /// user and file names. Not needed for the P1102 path.
+    /// user and file names. Not needed on the path this driver emits.
     pub const MINOLTA_USERNAME: u16 = 0x810e;
     pub const MINOLTA_FILENAME: u16 = 0x8115;
 }
@@ -505,7 +507,7 @@ impl std::fmt::Display for DecodeError {
 
 impl std::error::Error for DecodeError {}
 
-/// Decode a complete ZjStream. Used by `p1102 zjs-dump` and by round-trip tests.
+/// Decode a complete ZjStream. Used by `p1100 zjs-dump` and by round-trip tests.
 pub fn decode(stream: &[u8]) -> Result<Vec<DecodedChunk>, DecodeError> {
     if stream.len() < 4 || &stream[..4] != STREAM_SIGNATURE {
         return Err(DecodeError::BadStreamSignature);
@@ -611,7 +613,7 @@ pub const UEL: &str = "\u{1b}%-12345X";
 
 /// PJL prologue emitted before the `JZJZ` stream signature.
 ///
-/// Matches the reference framing for the P1102-class models. `timestamp` is passed in
+/// Matches the reference framing for this class of host-based models. `timestamp` is passed in
 /// rather than read from the clock so the output stays deterministic and testable.
 /// See the note in `docs/protocol.md`: HP's macOS driver uses a slightly different PJL
 /// preamble (`@PJL JOB NAME=`, `@PJL ENTER LANGUAGE=`), so exact PJL text is a
@@ -843,7 +845,7 @@ mod tests {
         let chunks = decode_of(&mut enc);
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0].header.ty, op::START_DOC);
-        // The P1102 path emits exactly these two: no PAGECOUNT, no QUANTITY.
+        // The reference emits exactly these two for this model: no PAGECOUNT, no QUANTITY.
         assert_eq!(chunks[0].items.len(), 2);
         assert_eq!(chunks[0].items[0].item, item::DMCOLLATE);
         assert_eq!(chunks[0].items[1].item, item::DMDUPLEX);
@@ -1013,7 +1015,7 @@ mod tests {
         assert_eq!(decode(b"").unwrap_err(), DecodeError::BadStreamSignature);
     }
 
-    /// These are what `p1102 zjs-dump` prints when it is pointed at something that is not a
+    /// These are what `p1100 zjs-dump` prints when it is pointed at something that is not a
     /// job - a CUPS raster, say - so the wording is part of the tool's interface.
     #[test]
     fn decode_errors_say_what_is_wrong() {

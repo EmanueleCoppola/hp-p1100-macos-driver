@@ -3,40 +3,40 @@
 version = 4
 
 [[package]]
-name = "p1102-cli"
+name = "p1100-cli"
 version = "0.1.0"
 dependencies = [
- "p1102-job",
- "p1102-protocol",
- "p1102-raster",
+ "p1100-job",
+ "p1100-protocol",
+ "p1100-raster",
 ]
 
 [[package]]
-name = "p1102-filter"
+name = "p1100-filter"
 version = "0.1.0"
 dependencies = [
- "p1102-job",
- "p1102-protocol",
- "p1102-raster",
+ "p1100-job",
+ "p1100-protocol",
+ "p1100-raster",
 ]
 
 [[package]]
-name = "p1102-jbig"
+name = "p1100-jbig"
 version = "0.1.0"
 
 [[package]]
-name = "p1102-job"
+name = "p1100-job"
 version = "0.1.0"
 dependencies = [
- "p1102-jbig",
- "p1102-protocol",
- "p1102-raster",
+ "p1100-jbig",
+ "p1100-protocol",
+ "p1100-raster",
 ]
 
 [[package]]
-name = "p1102-protocol"
+name = "p1100-protocol"
 version = "0.1.0"
 
 [[package]]
-name = "p1102-raster"
+name = "p1100-raster"
 version = "0.1.0"

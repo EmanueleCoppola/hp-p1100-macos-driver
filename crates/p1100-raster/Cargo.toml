@@ -1,6 +1,6 @@
 [package]
-name = "p1102-jbig"
-description = "JBIG (T.82) encoder for bi-level page images"
+name = "p1100-raster"
+description = "CUPS raster reader and mono conversion for the p1100 driver"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

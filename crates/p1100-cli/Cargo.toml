@@ -1,0 +1,15 @@
+[package]
+name = "p1100-cli"
+description = "Command line tool for the p1100 driver stack"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+p1100-protocol = { path = "../p1100-protocol" }
+p1100-raster = { path = "../p1100-raster" }
+p1100-job = { path = "../p1100-job" }
+
+[[bin]]
+name = "p1100"
+path = "src/main.rs"
