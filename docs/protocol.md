@@ -334,6 +334,23 @@ Foundation, libcups and libc, with no `socket`, `connect`, `CFStream` or URL loa
 "web server" is therefore reached through the device's USB interface, which is what the
 `CMD:...HTTP...` entry in the printer's own IEEE 1284 identity is advertising.
 
+The call site settles it rather than leaving it as an inference: the literal is 49 bytes
+(`0x31`), and the code four instructions away sends exactly that over the interface object.
+
+```asm
+movq  0x2311(%rip), %rsi     ## Objc selector ref: writeSynchronouslyFromBuffer:havingSize:writtenSize:
+leaq  0x10e7(%rip), %rdx     ## literal pool for: "GET /DevMgmt/ConsumableConfigDyn.xml HTTP/1.1\r\n\r\n"
+movl  $0x31, %ecx
+callq 0x100004764            ## Objc message: -[%rdi writeSynchronouslyFromBuffer:havingSize:writtenSize:]
+callq _get_http_header
+```
+
+So the request goes out over the bulk pipes and the reply is read back from them: parsed by a
+C helper named `get_http_header`, and then by `strstr`/`sscanf` over the body for the level.
+The fallback for printers it cannot reach over USB, `getSystemInk`, parses Apple's `snmpInk`
+output the same way, looking for `<key>prtMarkerSuppliesLevel</key>`. Nothing here is a CUPS
+backchannel, and nothing is PJL.
+
 It reads `DEVICE_URI` from the environment, parses it with `httpSeparateURI`, and reports a
 failure rather than guessing when it is absent. For devices it cannot reach that way it
 falls back to Apple's helper at `/System/Library/Printers/Libraries/snmpInk` through
