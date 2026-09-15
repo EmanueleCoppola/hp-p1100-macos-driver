@@ -324,10 +324,11 @@ of dots.
 
 HP's screen is not reproduced, for a reason worth stating rather than hiding: the matrix is not
 readable statically. `ProcessMonoOneBit` takes it as its `unsigned char*` argument and `main`
-passes a null there, so whatever ends up being used is resolved at runtime - a PPD attribute, or
-a default built somewhere else - and following that further stopped being worth the effort.
-Reproducing HP's halftone exactly needs it; substituting a screen of our own would be a guess
-with the same standing as the threshold, so the simpler behaviour stayed.
+passes a null there, and the caller is the whole of `main`: there is no PPD attribute for it
+either (the PPD has no screen or halftone keyword, only `*DefaultColorSpace: Gray`), so the
+table it falls back to is built inside the filter and the path to it did not resolve in the
+time this was worth. Reproducing HP's halftone needs that table; substituting a screen of our
+own would be a guess with the same standing as the threshold, so the simpler behaviour stayed.
 
 One observation settles whether it matters: print a graded fill or antialiased text, and compare
 it with the same page through HP's queue while that still runs. If ours looks worse in a way
