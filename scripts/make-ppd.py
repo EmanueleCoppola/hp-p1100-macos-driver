@@ -12,6 +12,7 @@ the source PPD is only read, and the output is a new file.
 
 Rewritten:
   *cupsFilter: "application/vnd.cups-raster 100 <hp filter>"  -> our filter
+  *APPrinterIconPath                                          -> our own .icns, with --icon
 Dropped (no equivalent yet, so CUPS must not try to run them):
   *cupsFilter lines pointing at a command filter such as HP's usbink
   *cupsCommands, *APPrinterUtilityPath
@@ -20,7 +21,7 @@ Relabelled:
 
 Usage:
     python3 scripts/make-ppd.py <source.ppd[.gz]> <filter-path> <out.ppd>
-                                [--suffix " (native ARM64)"]
+                                [--suffix " (native ARM64)"] [--icon PATH.icns]
 """
 
 import gzip
@@ -40,7 +41,7 @@ def read_maybe_gz(path):
         return f.read()
 
 
-def rewrite(data, filter_path, suffix):
+def rewrite(data, filter_path, suffix, icon_path=None):
     crlf = b'\r\n' in data
     eol = b'\r\n' if crlf else b'\n'
     lines = data.split(b'\n')
@@ -49,6 +50,8 @@ def rewrite(data, filter_path, suffix):
 
     out = []
     added = None
+    icon_line = '*APPrinterIconPath: "%s"' % icon_path if icon_path else None
+    icon_written = False
     old_nick = None
     new_nick = None
     for raw in stripped:
@@ -67,6 +70,17 @@ def rewrite(data, filter_path, suffix):
             continue
         if line.startswith('*APPrinterUtilityPath'):
             continue
+        # The icon is a picture the print system shows next to the queue, not a program, so
+        # pointing it at our own file is safe - unlike a filter line, which must never point
+        # into HP's tree. macOS reads this key and no other: the printer row in System
+        # Settings matches the icns exactly (docs/installation.md has the measurement).
+        if line.startswith('*APPrinterIconPath'):
+            if icon_line:
+                out.append(icon_line)
+                icon_written = True
+                continue
+            out.append(line)
+            continue
         if line.startswith('*cupsFilter'):
             value = line.split(':', 1)[1] if ':' in line else ''
             # The value is a quoted string: "<mime> <cost> <program>".
@@ -77,6 +91,11 @@ def rewrite(data, filter_path, suffix):
                     # Redirect the raster path at our filter, keeping the cost/priority.
                     added = '*cupsFilter: "application/vnd.cups-raster 100 %s"' % filter_path
                     out.append(added)
+                    if icon_line and not icon_written:
+                        # A source without an icon key at all still gets one, next to the
+                        # wiring we just wrote rather than anywhere else.
+                        out.append(icon_line)
+                        icon_written = True
                 # Otherwise it is a command filter: drop it.
                 continue
             out.append(line)
@@ -115,12 +134,16 @@ def main(argv):
     if '--suffix' in argv:
         suffix = argv[argv.index('--suffix') + 1]
         args = [a for a in args if a != suffix]
+    icon = None
+    if '--icon' in argv:
+        icon = argv[argv.index('--icon') + 1]
+        args = [a for a in args if a != icon]
     if len(args) != 3:
         print(__doc__)
         return 2
     src, filter_path, dst = args
     data = read_maybe_gz(src)
-    out = rewrite(data, filter_path, suffix)
+    out = rewrite(data, filter_path, suffix, icon)
     with open(dst, 'wb') as f:
         f.write(out)
     print('wrote %s (%d bytes) from %s' % (dst, len(out), src))

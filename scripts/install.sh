@@ -17,6 +17,7 @@ SOURCE_QUEUE=HP_LaserJet_Professional_P1102
 DEST=/Library/Printers/p1102
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 FILTER="$REPO/target/release/p1102-filter"
+ICON="$REPO/assets/p1102.icns"
 PYTHON=${PYTHON:-python3}
 DRY=0
 FORCE=0
@@ -25,12 +26,14 @@ DEVICE=
 usage() {
     cat <<EOF
 usage: $0 [--dry-run] [--force] [--queue NAME] [--source-queue NAME] [--device URI]
+             [--icon FILE.icns]
 
   --dry-run          print the commands instead of running them (no privileges needed)
   --force            replace an existing queue of the same name
   --queue NAME       queue to create            (default $QUEUE)
   --source-queue N   HP queue to inherit the device URI and PPD from (default $SOURCE_QUEUE)
   --device URI       use this device URI instead of reading it from the source queue
+  --icon FILE        printer icon to install and point the PPD at (default $ICON)
 EOF
 }
 
@@ -41,6 +44,7 @@ while [ $# -gt 0 ]; do
         --queue) QUEUE=$2; shift ;;
         --source-queue) SOURCE_QUEUE=$2; shift ;;
         --device) DEVICE=$2; shift ;;
+        --icon) ICON=$2; shift ;;
         -h|--help) usage; exit 0 ;;
         *) echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
     esac
@@ -61,11 +65,30 @@ die() { echo "error: $*" >&2; exit 1; }
 # stdin, so a gzipped one can be decompressed into it without a temporary file.
 ppd_diff() {
     diff - "$1" 2>/dev/null | grep -E '^[<>]' | grep -vE \
-        '^[<>] \*(%%|NickName|[a-zA-Z_@-]+\.Translation NickName/|cupsFilter: "application/vnd\.cups-(raster|command)|cupsCommands|APPrinterUtilityPath)' \
+        '^[<>] \*(%%|NickName|[a-zA-Z_@-]+\.Translation NickName/|cupsFilter: "application/vnd\.cups-(raster|command)|cupsCommands|APPrinterUtilityPath|APPrinterIconPath)' \
         | grep -vE '^[<>] *$' || true
 }
 
 # --- validating a generated PPD ---------------------------------------------
+
+# The icon is a picture the print system shows next to the queue, so a broken container is
+# not a crash: it is a printer row that quietly falls back to a generic glyph. Hence the
+# round trip through iconutil, which is the only reader that matters.
+check_icon() {
+    icon=$1
+    [ -f "$icon" ] || die "the icon $icon is missing; build it with 'scripts/make-icns.py'"
+    [ -s "$icon" ] || die "the icon $icon is empty"
+    magic=$(head -c 4 "$icon")
+    [ "$magic" = icns ] || die "$icon is not an icns container (it starts with '$magic')"
+    work=$(mktemp -d) || die "cannot create a temporary directory"
+    if ! iconutil -c iconset "$icon" -o "$work/p1102.iconset" >/dev/null 2>&1 \
+       || [ ! -f "$work/p1102.iconset/icon_128x128.png" ]; then
+        rm -rf "$work"
+        die "$icon is not an icns macOS can read back; rebuild it with scripts/make-icns.py"
+    fi
+    rm -rf "$work"
+    echo "icon: $icon"
+}
 
 # Two things CUPS itself cannot do here, both checked rather than assumed: macOS ships no
 # cupstestppd, and cupsfilter falls back to its built-in conversion rules when a PPD declares
@@ -79,8 +102,15 @@ check_ppd() {
 
     grep -q "^\*cupsFilter: \"application/vnd.cups-raster 100 $DEST/p1102-filter\"" "$ppd" \
         || die "the generated PPD does not point its raster filter at $DEST/p1102-filter"
-    # Only filter lines matter here: *APPrinterIconPath still points at HP's icon on purpose,
-    # so that the queue keeps a printer icon; that is a picture, not a program.
+    # The icon is the one line that names a file of ours outside this check's usual reach, so
+    # it is asserted directly: the row would otherwise show HP's picture, or none.
+    grep -q "^\*APPrinterIconPath: \"$DEST/p1102.icns\"$" "$ppd" \
+        || die "the generated PPD does not point *APPrinterIconPath at $DEST/p1102.icns"
+    if grep -E '^\*APPrinterIconPath:.*(/Library/Printers/hp|hp1100)' "$ppd" >/dev/null; then
+        die "the generated PPD still points its icon into HP's installation"
+    fi
+    # Only filter lines matter here: a filter is a program, and none may come from HP's
+    # installation, which cannot run on this machine at all.
     grep -E '^\*cupsFilter:.*(hpRaster\.bundle|/Library/Printers/hp)' "$ppd" \
         && die "the generated PPD still routes a filter into HP's installation"
     for gone in '^\*cupsCommands' '^\*APPrinterUtilityPath' '^\*cupsFilter: "application/vnd.cups-command'; do
@@ -141,6 +171,19 @@ else
     esac
 fi
 
+# Same treatment for the icon: a real run stops before writing anything, a dry run says so
+# and carries on, because the point of a dry run is to report rather than to fail.
+if [ -f "$ICON" ] && [ -s "$ICON" ]; then
+    check_icon "$ICON"
+elif [ "$DRY" = 1 ]; then
+    echo "note: $ICON does not exist or is empty; a real run would stop here."
+    echo "      build it with './scripts/make-icns.py'"
+else
+    die "the icon $ICON is missing or empty; build it with:
+    scripts/make-icns.py
+  (which draws it and packs the .icns with iconutil and sips, both stock macOS)"
+fi
+
 # --- device URI -------------------------------------------------------------
 
 if [ -z "$DEVICE" ]; then
@@ -171,9 +214,10 @@ fi
 # --- act --------------------------------------------------------------------
 
 echo
-echo "1. installing the filter and PPD into $DEST"
+echo "1. installing the filter, the icon and the PPD into $DEST"
 run mkdir -p "$DEST"
 run /usr/bin/install -m 0755 -o root -g wheel "$FILTER" "$DEST/p1102-filter"
+run /usr/bin/install -m 0644 -o root -g wheel "$ICON" "$DEST/p1102.icns"
 if [ "$DRY" = 1 ]; then
     # Generate the PPD somewhere harmless and check it, so a dry run says something about
     # the artifact as well as about the commands.
@@ -184,12 +228,13 @@ if [ "$DRY" = 1 ]; then
         (
             trap 'rm -f "$probe_ppd"' EXIT
             "$PYTHON" "$REPO/scripts/make-ppd.py" "$SRC_PPD" "$DEST/p1102-filter" "$probe_ppd" \
-                || exit 1
+                --icon "$DEST/p1102.icns" || exit 1
             check_ppd "$probe_ppd"
         ) || die "the PPD could not be generated or did not pass its check"
     fi
 else
-    run "$PYTHON" "$REPO/scripts/make-ppd.py" "$SRC_PPD" "$DEST/p1102-filter" "$DEST/p1102.ppd"
+    run "$PYTHON" "$REPO/scripts/make-ppd.py" "$SRC_PPD" "$DEST/p1102-filter" "$DEST/p1102.ppd" \
+        --icon "$DEST/p1102.icns"
     # Before the queue is created, not after: a PPD CUPS cannot use must not reach lpadmin.
     check_ppd "$DEST/p1102.ppd"
 fi
@@ -206,6 +251,10 @@ run cupsaccept "$QUEUE"
 
 echo
 echo "done. the HP installation under /Library/Printers/hp was not touched."
+echo
+echo "the queue's icon shows up next to its name in System Settings and in the print dialog."
+echo "if the row still shows the old picture, the print system has it cached:"
+echo "    sudo launchctl kickstart -k system/org.cups.cupsd"
 echo
 echo "try it:"
 echo "    lp -d $QUEUE /path/to/file.pdf"

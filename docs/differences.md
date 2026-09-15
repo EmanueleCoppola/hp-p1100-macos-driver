@@ -335,7 +335,8 @@ same job to this filter: CUPS's page-setup filter has already done the rotation.
   differs, and "only" is now measured rather than asserted: generating the PPD and diffing
   it against the installed one shows two added comment lines, the `*NickName` line and its
   sixteen localised `*.Translation NickName/` keys gaining a " (native ARM64)" suffix, the
-  raster filter line repointed at our filter, and three lines removed - HP's
+  raster filter line repointed at our filter, `*APPrinterIconPath` repointed at the icns we
+  install, and three lines removed - HP's
   `application/vnd.cups-command` filter, `*cupsCommands`, and `*APPrinterUtilityPath`.
   Nothing else, in 1297 lines. The command is in docs/installation.md, which carries the
   same table.
