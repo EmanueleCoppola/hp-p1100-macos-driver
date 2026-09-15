@@ -30,10 +30,17 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
-SRC_PPD = '/etc/cups/ppd/HP_LaserJet_Professional_P1102.ppd'
-APPLE_PPD = '/Library/Printers/PPDs/Contents/Resources/hp1100.ppd.gz'
 INSTALL_DIR = '/Library/Printers/p1102'
 FIXTURE = os.path.join(REPO, 'fixtures/inputs/text-1p.txt')
+
+# Both PPDs install.sh can generate from: the queue's, which is what this Mac has, and Apple's,
+# which it falls back to on a machine with no HP queue. Both are checked, because "a machine
+# without the HP driver still gets a working queue" is a claim in docs/installation.md, and this
+# is what turns it into a check. The two describe the same device, so the same cases apply.
+SOURCES = [
+    ('/etc/cups/ppd/HP_LaserJet_Professional_P1102.ppd', 'the installed queue PPD'),
+    ('/Library/Printers/PPDs/Contents/Resources/hp1100.ppd.gz', "Apple's PPD, install.sh's fallback"),
+]
 
 # The options the generated PPD has to carry through unchanged, and whether each is known to
 # change HP's own raster. That second field is what keeps the cases honest: an option that moves
@@ -61,16 +68,17 @@ CASES = [
 ]
 
 
-def source_ppd():
-    for path in (SRC_PPD, APPLE_PPD):
-        if os.path.exists(path):
-            return path
-    raise SystemExit('cannot find a source PPD: neither %s nor %s exists' % (SRC_PPD, APPLE_PPD))
+def sources():
+    found = [(path, label) for path, label in SOURCES if os.path.exists(path)]
+    if not found:
+        raise SystemExit('cannot find a source PPD: none of %s exists'
+                         % ', '.join(path for path, _ in SOURCES))
+    return found
 
 
-def generate(dst):
+def generate(dst, src):
     """Run the installer's generator exactly the way install.sh calls it."""
-    cmd = [sys.executable, os.path.join(HERE, 'make-ppd.py'), source_ppd(),
+    cmd = [sys.executable, os.path.join(HERE, 'make-ppd.py'), src,
            INSTALL_DIR + '/p1102-filter', dst, '--icon', INSTALL_DIR + '/p1102.icns']
     proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if proc.returncode != 0:
@@ -114,53 +122,56 @@ def main(argv):
     args = ap.parse_args(argv)
 
     work = args.keep or tempfile.mkdtemp(prefix='p1102-ppd-')
-    ours = os.path.join(work, 'p1102.ppd')
-    size = generate(ours)
-    src = source_ppd()
-    print('generated PPD: %d bytes from %s' % (size, src))
-
-    with open(ours, 'rb') as f:
-        first = f.readline().rstrip(b'\n')
-    if first != b'*PPD-Adobe: "4.3"':
-        print('the generated PPD begins with %r, which CUPS cannot open' % first, file=sys.stderr)
-        return 1
-    print('line 1: %s' % first.decode('latin1'))
-
     failures = 0
-    hp_default = os.path.join(work, 'hp-default.raster')
-    cups_raster(src, [], hp_default)
-    for label, options, must_move in CASES:
-        hp_raster = os.path.join(work, 'hp.raster')
-        our_raster = os.path.join(work, 'ours.raster')
-        cups_raster(src, options, hp_raster)
-        cups_raster(ours, options, our_raster)
-        identical = same(hp_raster, our_raster)
-        moved = not same(hp_raster, hp_default)
-        note = ''
-        if must_move and not moved:
-            note = "   <- no longer moves HP's raster, so this case tests nothing"
+    compared = 0
+    for n, (src, label) in enumerate(sources()):
+        ours = os.path.join(work, 'p1102-%d.ppd' % n)
+        size = generate(ours, src)
+        with open(ours, 'rb') as f:
+            first = f.readline().rstrip(b'\n')
+        print('from %s (%s):' % (src, label))
+        print('  %d bytes, line 1 is %s' % (size, first.decode('latin1')))
+        if first != b'*PPD-Adobe: "4.3"':
+            print('  a PPD whose first line is not *PPD-Adobe is one CUPS cannot open',
+                  file=sys.stderr)
             failures += 1
-        elif must_move:
-            note = "   (moves HP's raster)"
-        print('  %-52s %9d %s%s'
-              % (label, os.path.getsize(hp_raster), 'identical' if identical else 'DIFFERENT',
-                 note))
-        if not identical:
-            failures += 1
+            continue
 
-    fails = conformance(ours)
-    if fails:
-        print('cupstestppd rejects the generated PPD:', file=sys.stderr)
-        for line in fails:
-            print('  ' + line, file=sys.stderr)
-        failures += 1
-    else:
-        print('cupstestppd: no conformance failures')
+        src_default = os.path.join(work, 'source-default-%d.raster' % n)
+        cups_raster(src, [], src_default)
+        for case, options, must_move in CASES:
+            src_raster = os.path.join(work, 'source.raster')
+            our_raster = os.path.join(work, 'ours.raster')
+            cups_raster(src, options, src_raster)
+            cups_raster(ours, options, our_raster)
+            identical = same(src_raster, our_raster)
+            moved = not same(src_raster, src_default)
+            note = ''
+            if must_move and not moved:
+                note = "   <- no longer moves the source's raster, so this case tests nothing"
+                failures += 1
+            elif must_move:
+                note = "   (moves the source's raster)"
+            print('  %-52s %9d %s%s'
+                  % (case, os.path.getsize(src_raster),
+                     'identical' if identical else 'DIFFERENT', note))
+            if not identical:
+                failures += 1
+            compared += 1
+
+        fails = conformance(ours)
+        if fails:
+            print('  cupstestppd rejects the generated PPD:', file=sys.stderr)
+            for line in fails:
+                print('  ' + line, file=sys.stderr)
+            failures += 1
+        else:
+            print('  cupstestppd: no conformance failures')
 
     if failures:
-        print('%d of %d cases did not match' % (failures, len(CASES)), file=sys.stderr)
+        print('%d of %d comparisons did not match' % (failures, compared), file=sys.stderr)
         return 1
-    print('all %d cases produce the same raster as %s' % (len(CASES), src))
+    print('all %d comparisons produce the same raster as their source PPD' % compared)
     if args.keep:
         print('kept in %s' % work)
     return 0
