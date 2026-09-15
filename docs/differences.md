@@ -56,14 +56,31 @@ is now readable in its binary. Every PJL literal `rastertozjs` contains is:
 @PJL USTATUS JOB=ON%n     @PJL USTATUS PAGE=ON%n        @PJL USTATUS DEVICE=ON%n
 ```
 
-The language argument comes from a table beside it that holds `HBS` and `ZJS`, so **LIKELY**
-HP sends `@PJL ENTER LANGUAGE=ZJS`. Three further things follow from that list and from the
-PPD. The `DENSITY` and `JAMRECOVERY` lines are not in the binary because the PPD supplies
-them - its two `*cupsPJL` entries are exactly those two lines - which is also why the
-driver's strings carry the *option names* `cupsPJL`, `pjlDensity`, `pjlJamRecovery`,
-`pjlDuplexOffset` and `cupsRET`. And there is no `JOBATTR`, `ECONOMODE`, `RET=MEDIUM` or
-`USTATUS TIMED` literal anywhere in it, so the three lines the reference adds and HP does
-not have are exactly those.
+The order they are sent in is readable too, because the emission is straight-line code that
+calls `zcups::Formatter::sendPJL` once per line. HP's `startJob` sends this:
+
+```text
+@PJL USTATUS JOB=ON     @PJL USTATUS PAGE=ON     @PJL USTATUS DEVICE=ON
+@PJL INFO STATUS        @PJL JOB NAME=<the job title>
+<the PPD's own *cupsPJL lines, with the marked choice substituted>
+@PJL ENTER LANGUAGE=<ZJS>
+```
+
+and its `endJob` sends `@PJL EOJ` and then `@PJL USTATUSOFF`. The whole prologue is gated on
+`getModelNumber() & 0x100`, and this printer's PPD declares `*cupsModelNumber: 256` - so HP
+does send one here. The language argument is chosen by `model & 1`: with 256 that bit is clear
+and the argument is the literal **`ZJS`**, which makes it CONFIRMED rather than likely. The
+only other candidate in the code is the literal `HBS`, which no model this PPD covers
+selects: it declares one `*cupsModelNumber` for the whole family.
+
+Three further things follow from that and from the PPD. The `DENSITY` and `JAMRECOVERY` lines
+are not in the binary because the PPD supplies them: the code looks them up with
+`ppdFindAttr("cupsPJL", key)` and `ppdFindMarkedChoice(key)`, so the text comes from the PPD's
+template - `@PJL SET DENSITY = %s%n`, spaces and all - rather than from the driver. That is
+also why the driver's strings carry the *option names* `cupsPJL`, `pjlDensity`,
+`pjlJamRecovery`, `pjlDuplexOffset` and `cupsRET`. And there is no `JOBATTR`, `ECONOMODE`,
+`RET=MEDIUM` or `USTATUS TIMED` literal anywhere in it, so the three lines the reference adds
+and HP does not have are exactly those.
 
 So the two wrappers differ in both directions, and we follow the reference in both: no
 `JOB NAME`, no `ENTER LANGUAGE`, no `EOJ`, plus `ECONOMODE`, `RET=MEDIUM`, `USTATUS TIMED`

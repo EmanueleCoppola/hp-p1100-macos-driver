@@ -70,9 +70,12 @@ and the PPD carries `*cupsPJL pjlDensity: "@PJL SET DENSITY = %s%n"`.
 
 **Differences matter**: HP's macOS driver uses `@PJL JOB NAME="..."`, adds
 `@PJL ENTER LANGUAGE="..."` and `@PJL EOJ`, and its literals do not show the
-`JOBATTR`/`RET`/`TIMED` lines. **LIKELY** the `ENTER LANGUAGE` argument is `ZJS`. So the
-two implementations are semantically equivalent but not textually identical, which is
-exactly the class of difference the golden-master comparison has to tolerate.
+`JOBATTR`/`RET`/`TIMED` lines. **CONFIRMED** the `ENTER LANGUAGE` argument is `ZJS` for this
+model: the code picks between the literals `ZJS` and `HBS` on `model & 1`, and the PPD's
+`*cupsModelNumber: 256` leaves that bit clear. So the two implementations are semantically
+equivalent but not textually identical, which is exactly the class of difference the
+golden-master comparison has to tolerate; `docs/differences.md` item 1 has HP's full
+sequence.
 
 ## Record format
 
