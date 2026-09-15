@@ -111,18 +111,17 @@ in HP's `jbig::` C++ classes, not a reimplementation. One curiosity worth record
 (the P1005/P1006/P1505/1020 driver) does, and that file is the GPL notice for Markus Kuhn's
 library, `jbig.c,v 1.1 2007`.
 
-**The licence we chose, and why.** This project is dual-licensed MIT OR Apache-2.0, at your
-option, with both texts taken verbatim from the SPDX licence list. That is possible because
-the implementation is our own: written from the ZjStream format, the T.82 standard and
-observed behaviour. The reference implementations were read to *understand* the protocols and
-are used only as test oracles - never linked, never copied, never shipped - which is what
-keeps the GPL of foo2zjs and jbigkit out of this codebase.
+**The licence we chose, and why.** This project is licensed under the MIT licence, whose
+canonical text is in `LICENSE`. That is possible because the implementation is our own:
+written from the ZjStream format, the T.82 standard and observed behaviour. The reference
+implementations were read to *understand* the protocols and are used only as test oracles -
+never linked, never copied, never shipped - which is what keeps the GPL of foo2zjs and jbigkit
+out of this codebase.
 
 Worth being precise about one thing rather than overstating it: "read to understand" is not
 the same as a strict clean-room, where the original is never seen. The formats are facts and
-the code is ours, but if you would rather the project were GPL-2.0 to remove any doubt, that
-is a change of two files plus this paragraph. A permissive default was chosen and recorded
-here rather than assumed, because the manifest already declared it.
+the code is ours. A permissive MIT licence was chosen and recorded here because the manifest
+declares it.
 
 **The one thing that is necessarily shared** is the normative T.82 arithmetic coder table in
 crates/p1100-jbig: a table of constants that every conforming JBIG implementation has to
