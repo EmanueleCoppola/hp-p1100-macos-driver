@@ -265,6 +265,15 @@ through the filter by splicing two real rasters ("Letter" then "A4"): the job ca
 splice is needed because `cupsfilter` cannot build a mixed-size job here - its chain has no
 PostScript-to-raster path, so the PostScript that would describe one cannot be rendered.
 
+Duplex has its own measurement, because it is the one case where a filter could plausibly do
+something and should not. The PPD declares `*cupsBackSide: "Rotated"`, and CUPS acts on it
+before any filter runs: a two-page job submitted with `-o sides=two-sided-long-edge` comes out of
+`cupsfilter` with page 2 upside down - its ink sits at rows 6314..6393 of 6400 where simplex
+printing puts it at 7..86. So passing the pixels through is correct, and a filter that rotated
+the back side itself would print it the wrong way up. The comparison harness has no duplex case
+for this reason: the reference driver *does* rotate and reorder, by construction, so comparing
+against it there would fail for a reason that is not ours.
+
 Two things are deliberately *not* in the case list, and both are recorded in
 `docs/differences.md`: duplex (the reference reorders and rotates pages host-side, we leave
 that to the printer) and the media code (it reaches us in the raster header, which is set

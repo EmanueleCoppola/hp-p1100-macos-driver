@@ -184,38 +184,43 @@ the device is the paper and toner conditions, which is precisely what HP reads t
 for - so the open question is narrower than it first looks: **do paper and toner reasons appear
 on this queue?**
 
-## 5. Duplex items are emitted; both known drivers also have host-side page handling. UNKNOWN
+## 5. Duplex: CUPS rotates the back side itself; the ordering is the open part. LIKELY right
 
 The PPD offers Duplex None / DuplexNoTumble / DuplexTumble, and CUPS describes this printer
 as doing manual duplex. We forward the choice as `ZJI_DMDUPLEX` items on the document header,
 the page and the image and page ends, and leave the ordering of sheets to the printer.
 
-Both known implementations do more than that, which is worth stating because it is the
-reason this item is still open rather than settled in our favour.
+**Measured: CUPS rotates the back side itself, before the filter ever sees the page.** The PPD
+declares `*cupsBackSide: "Rotated"`, and a two-page job submitted with
+`sides=two-sided-long-edge` comes out of `cupsfilter` with page 2 upside down: its ink sits at
+rows 6314..6393 of 6400 where simplex printing puts it at 7..86, a clean 180 degrees. A filter
+that rotated the back side therefore would *undo* CUPS's work and print it the wrong way up,
+which makes "emit the items and pass the pixels through" the right behaviour here rather than
+the least-supported one.
 
-The reference driver pairs pages in host memory for a duplex job, rotates every second page
-180 degrees for long-edge duplex, and pads an odd page count with a blank sheet
-(`rotate_bytes_180` in `pbm_pages`, and the "P2(norm), P1(rot180), P4(norm), P3(rot180)"
-comment in `foo2zjs.c`). That is why a one-page duplex job from it comes out as two pages.
+It also explains the reference driver. It rotates every second page itself (`rotate_bytes_180`
+in `pbm_pages`, with the "P2(norm), P1(rot180), P4(norm), P3(rot180)" comment) because the
+architecture it was written for renders its own raster rather than going through CUPS's
+page-setup filters - the same reason it pairs pages and pads an odd count with a blank sheet,
+which is why a one-page duplex job from it comes out as two pages.
 
-HP's filter has the same kind of machinery: `zcups::CupsRaster::getJobDuplex()`,
-`zcups::ZjsMonoFormatter::despoolDuplex()` with its "requested" and "maximum pagesize"
-messages, a `zjs::JobSaver`, a `_flipLine` routine, and the property names `DupUnit` and
-`pjlDuplexOffset`. Its strings also name three distinct manual-duplex paths ("Manual Duplex",
-"Manual Duplex Portent", "Manual Duplex Other Path"). So the despooling path exists; whether
-it runs for a P1102 in a given duplex mode is not something the disassembly says on its own.
+HP's filter has page-handling machinery of its own (`despoolDuplex`, `addBlankPage`,
+`getJobDuplex`, a `zjs::JobSaver`, `_flipLine`, the property names `DupUnit` and
+`pjlDuplexOffset`, and three named manual-duplex paths), and it runs at job end rather than per
+page: hold pages, pad an odd count with a blank, then write them out. Whether it takes that
+path for a P1102 in a given duplex mode is not something the disassembly says on its own.
 
-Against both of those, there is evidence that the printer drives this flow itself: the PPD
-declares `*cupsIPPReason ManualDuplex` with the printer's own instruction - "remove the
-paper stack from the output bin and insert into Tray 1 printed side down… Then, press the Go
-button" - and it does not declare `*cupsManualDuplex`, so CUPS is not splitting the job
-either. A printer that prompts and waits for a button has its own idea of page order.
+What is still open is therefore only the *ordering*. Two things point the same way: the printer
+prompts for manual duplex itself - the PPD carries its own instruction as `*cupsIPPReason
+ManualDuplex`, "remove the paper stack… press the Go button" - and a printer that prompts has
+its own idea of page order, which for a flip-the-stack flow is document order. The PPD also
+declares no `*cupsManualDuplex`, so CUPS is not splitting the job either. We send document
+order, which is what both facts point at.
 
-We emit `ZJI_DMDUPLEX` and leave the order alone, and this item says plainly that this is the
-behaviour least supported by evidence of the three. It is settled by one two-sided test, and
-the failure mode to look for is specific: **sheets come out single-sided, in document order,
-with no prompt of any kind.** Simplex printing is unaffected either way, and the comparison
-harness deliberately keeps no duplex case, so that its pass condition stays meaningful.
+Settled by one two-sided test, with two specific things to look for: does the printer prompt,
+and do the sheets come back in the right order? Simplex printing is unaffected either way, and
+the comparison harness deliberately keeps no duplex case: the reference reorders pages by
+construction, so comparing against it there would fail for a reason that is not ours.
 
 ## 6. Media type codes are HP's own. UNKNOWN for anything but plain paper
 
@@ -343,7 +348,7 @@ Each one maps to an observation the hardware test makes:
 | 1, PJL wrapper | if nothing prints at all, this is the first suspect; resending the same payload with `P1102_NO_PJL=1` separates a wrapper problem from an image problem |
 | 2, JBIG adaptive template | a page that prints but is corrupt or truncated points here, since the framing, the coder and the typical-prediction path are all byte-verified against the reference |
 | 4, command path | absent supplies reporting is visible in the print dialog, not in printing |
-| 5, duplex | send a three-page job with `Duplex=DuplexNoTumble`: the printer should prompt to flip the stack ("press the Go button"), and two-sided output means our item-only approach is right; single-sided sheets in document order with no prompt means it needs the host-side handling both other drivers have |
+| 5, duplex | send a two-page job with `Duplex=DuplexNoTumble`: the printer should prompt to flip the stack ("press the Go button"), and the back of each sheet should be the right way up, which CUPS's rotation has already arranged. Single-sided output with no prompt would mean the job needs host-side page *pairing*, not rotation |
 | 6, media codes | whether a non-plain-paper job prints correctly, or jams or misfeeds |
 | 10, media source | settled: the PPD's default is read and an explicit `InputSlot` overrides it. If a job ever prints one page and then waits for paper, the code it sends is DMBIN 4 (manual feed, the PPD's default) |
 | 11, grey conversion | print a graded fill or antialiased text: ours thresholds, HP's screens, so expect harder edges. HP's queue can be used for the comparison while it still exists |
