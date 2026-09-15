@@ -271,8 +271,36 @@ generated one. Each case below was judged by the reference decoder:
 | raster with no pages | filter exits 1, no output |
 | raster truncated mid-page | filter exits 1, naming the page and the shortfall |
 
-It runs the filter from its wasm build, so it needs wasmtime or node; pass P1005_WASMTIME to
-point at a wasmtime binary that is not on PATH.
+### What the rehearsal does not cover, and why
+
+The rehearsal invokes the filter with the argv and environment CUPS documents. It cannot
+invoke it *through* CUPS, and the reason is worth recording so nobody assumes otherwise:
+
+- **cupsfilter does not run a PPD's printer filter.** It builds its chain from the MIME
+  conversion table (`/usr/share/cups/mime/mime.convs`), so asking it for a destination type
+  it does not know fails with `Unknown destination MIME type`, and asking for
+  `printer/*` selects the built-in PostScript path. The last filter in a PPD is only ever
+  run by cupsd.
+- **cupsd cannot be started as a non-root user here.** `/usr/sbin/cupsd` is mode
+  `0500 root:wheel`, so a private instance on a high port is not possible. Driving our filter
+  through CUPS requires a queue, which requires the install step, which requires sudo.
+
+What can be checked without a queue is the other half of the contract, and one piece of it
+comes from CUPS itself rather than from documentation. cupsfilter prints the argv shape it
+uses for a filter:
+
+```text
+DEBUG: argv[0]="cupsfilter"   DEBUG: argv[1]="1"        DEBUG: argv[2]="manu"
+DEBUG: argv[3]=<title>        DEBUG: argv[4]="1"        DEBUG: argv[5]=<options>
+DEBUG: argv[6]=<input file>
+```
+
+That is exactly what p1005-filter implements: options at argv[5], the input file at argv[6],
+and stdin when there is no file. Both routes are exercised by the rehearsal, and the option
+strings come from the printer's real PPD, so the remaining untested piece is narrow: whether
+cupsd reaches the filter at all with our PPD, which the first real print answers.
+
+
 
 
 ## Golden-master strategy, and why it is currently blocked
