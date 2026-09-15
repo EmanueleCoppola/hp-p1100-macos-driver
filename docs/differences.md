@@ -362,6 +362,34 @@ reading, and the rehearsal checks the real PPD - with `PPD` set and no options t
 Page size, media type and resolution need none of this: the raster page header already reflects
 the PPD's defaults for those, which is where the interface says a raster filter should look.
 
+**Which spelling arrives in argv[5] is worth being exact about**, because it decides what the
+filter has to understand. filter(7) says the options are "encoded from the corresponding IPP
+attributes used when the job was submitted" and points a filter at `cupsMarkOptions()` to map
+them onto PPD options - which is what HP's driver does, since it imports `ppdMarkDefaults`,
+`cupsMarkOptions` and `ppdFindMarkedChoice`. Two consequences follow, and both are handled:
+
+- For attributes that have a standard IPP spelling, the name differs from the PPD's: `sides`
+  for `Duplex`, `media-source` for `InputSlot`. The filter accepts both spellings of duplex,
+  and a unit test pins that down, because accepting only the PPD one would silently ignore a
+  two-sided request.
+- `media-source` cannot change anything on this printer, and that is a property of the file
+  rather than a guess: this PPD declares exactly one `InputSlot` choice, `Manual`, so CUPS's
+  own mapping has no other choice to select and a job that asks for a different source leaves
+  the file's default in place - which is precisely what the filter does with a key it does not
+  recognise. For HP's custom options (`pjlDensity`, `pjlJamRecovery`, `EconoMode`) the IPP
+  attribute name *is* the PPD option name, which is why reading the PPD names works at all.
+
+The check that no option can be accepted and ignored is `scripts/rehearse-job.py`, which reads
+the `*OpenUI` groups of the installed PPD and fails if one of them is in neither list:
+
+    mapped by the filter:  Duplex, InputSlot, pjlDensity, pjlJamRecovery, EconoMode
+    carried by the raster: PageSize, PageRegion, MediaType, Resolutions
+
+Nine groups, all accounted for, on the PPD this queue uses. It is a check rather than a
+paragraph because the realistic way to break it is to regenerate the PPD from a different HP
+bundle - a P1505 or a P1560 offers other slots and other groups - and an option in neither list
+is a setting the queue would show, accept and never pass to the printer.
+
 ## 11. Grey is screened by HP and thresholded by us. CONFIRMED difference, appearance only
 
 CUPS hands the filter 8 bits per pixel of grey - the PPD asks for exactly that
