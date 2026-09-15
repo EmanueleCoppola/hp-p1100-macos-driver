@@ -416,9 +416,12 @@ screen versus a threshold - it is a different bit depth:
   resolution selects `_sdtahs10`; the `600x600dpi` choice, whose marker is 1, gives 0 there and
   falls back to the raster's 600, selecting `_sdtahr10`.
 - `_ScreenPixelsTwoBit` indexes the table by the *pixel value* - `table[pixel * 48]` - and the
-  byte it finds holds four 2-bit values, one for each column of a group of four pixels; the row
-  comes from `(line % 12) * 4`. Each table is therefore 256 entries of 12 rows by 4 bytes:
-  12288 bytes, exactly the distance between the two symbols.
+  byte it finds holds four 2-bit values, one for each column of a group of four pixels. The row
+  comes from the call's line counter, and that counter is the band's *remaining* line count as it
+  counts down, so the cell's vertical phase steps by one row per line and restarts at the next
+  band - the height is rounded up to a multiple of 12 before it is passed in, which fixes the
+  phase's starting point. Each table is therefore 256 entries of 12 rows by 4 bytes: 12288
+  bytes, exactly the distance between the two symbols.
 - Decoded that way the tables are what they should be, and `scripts/hp-tone-table.py` reads them
   out of the installed driver and checks it: entry 0 is all black, entry 255 all white, and the
   entries between them are clustered-dot cells that get lighter as the grey value rises. On this
@@ -431,12 +434,16 @@ cell chosen by grey level - while ours carry one, thresholded at 128. The protoc
 antialiased text and photographs get a hard edge from us where HP would print a dot pattern, and
 the printer would have four levels to work with instead of two.
 
-What matching it would take, and why it is not done yet: the item side follows from the depth
-(`ZJI_VIDEO_BPP` and `ZJI_VIDEO_X` are already computed from `bits_per_pixel` in
-`crates/p1102-protocol`), but the image becomes **two bit planes** instead of one, so the encoder
-would have to emit two, and the chunk and plane shape HP uses for that has not been read out of
-its binary - `ZjsMonoFormatter::startPage` is where to look. The tone tables are HP's own data,
-so a legitimate implementation would read them out of the user's installed driver, which is what
+What matching it would take, and why it is not done yet. The item side is small but not free:
+`PageGeometry` in `crates/p1102-protocol` carries a `bits_per_pixel` that `ZJI_VIDEO_BPP` and
+`ZJI_VIDEO_X` are computed from, but `mono()` hard-codes it to 1 and nothing plumbs a depth
+through. The image becomes **two bit planes** instead of one, so the encoder has to emit two.
+And the chunk and plane shape HP uses for that has not been read out of its binary: its page
+items come from `zcups::Formatter::startPage`, which takes the depth as its third argument and
+reads a `bitsPerPixel` property, and whether plane records are written at all is behind three
+`zjs::BandWriter` flags - `sendPlaneItem`, `sendStartPlaneChunk` and `sendEndPlaneChunk` -
+which are what a two-bit implementation has to settle. The tone tables are HP's own data, so a
+legitimate implementation would read them out of the user's installed driver, which is what
 `scripts/hp-tone-table.py` does. And none of it can be validated without the printer: a wrong
 two-bit framing would stop the queue printing, where a wrong tone curve only looks wrong. That is
 why the threshold stays until there is a device to try it on.
@@ -454,7 +461,10 @@ side: our filter accepts 1 bit per pixel (copied through) and 8 (thresholded) an
 anything else with a one-line error naming the depth, before writing a byte of the job - a
 4900-pixel-wide page relabelled as 2, 4 or 16 bits per pixel exits 1 with `ERROR: encoding job:
 unsupported raster depth: N bits per pixel`. And the reference comparison does not cover any of
-this, because the page both sides see there is bilevel (see "How this list is measured now").
+this: the page both sides see there is bilevel (see "How this list is measured now"), the
+reference *driver* only ever reads a 1-bit `pbmraw` page, and in its chain the grey decision
+belongs to Ghostscript (`-sDEVICE=pbmraw` in its wrapper), which is not installed on this
+machine - so a grey page cannot be put through the reference chain here either.
 
 One observation settles whether the two-bit difference matters in practice: print a graded fill
 or antialiased text and compare it with the same page through HP's queue while that still runs.
