@@ -122,9 +122,13 @@ def make_raster(fixture, options, dst):
 
 
 def our_job(cmd, raster, options, dst):
+    # CUPS gives a filter the queue's PPD in the environment and sends only the options the
+    # job named, so this is what a real job looks like: the filter takes the rest from the file.
+    env = dict(os.environ)
+    env['PPD'] = PPD
     with open(dst, 'wb') as out:
         proc = subprocess.run(cmd + ['1', 'manu', 'compare', '1', options, raster],
-                              stdout=out, stderr=subprocess.PIPE)
+                              stdout=out, stderr=subprocess.PIPE, env=env)
     if proc.returncode != 0:
         raise SystemExit('our filter failed: %s' % proc.stderr.decode('utf-8', 'replace'))
     return os.path.getsize(dst)
@@ -152,7 +156,9 @@ def reference_job(pages, header, flags, work):
     gx = int(round(page[0] * rx / 72.0))
     gy = int(round(page[1] * ry / 72.0))
     code = PAPER_CODES.get(header['page_size_name'])
-    cmd = [ORACLE, '-z2', '-P', '-L0', '-r%dx%d' % (rx, ry), '-g%dx%d' % (gx, gy), '-s', '1']
+    # `-s 4` is the media source this printer's PPD defaults to, which is what the filter reads
+    # out of the file when the job names nothing; the reference takes it as a flag instead.
+    cmd = [ORACLE, '-z2', '-P', '-L0', '-r%dx%d' % (rx, ry), '-g%dx%d' % (gx, gy), '-s', '4']
     if code is not None:
         cmd += ['-p', str(code)]
     cmd += flags + paths

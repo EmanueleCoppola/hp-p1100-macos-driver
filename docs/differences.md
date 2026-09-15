@@ -249,20 +249,30 @@ documents as the horizontal pixel alignment.
 - The 1284 device ID, the USB device path and the queue's device URI are inherited rather
   than re-derived.
 
-## 10. The media source default, when CUPS passes no `InputSlot`. LIKELY harmless
+## 10. Options a job does not name now come from the PPD. CONFIRMED
 
 Three defaults disagree, and all three are defensible on a printer with one tray: ours is 1
 ("only one"), the reference driver's is 7 (auto), and the PPD's own default - which HP's
 filter reads out of the PPD with `ppdMarkDefaults` and `ppdFindMarkedChoice`, both visible in
 its imports - is `*DefaultInputSlot: Manual`, i.e. 4.
 
-What makes this mostly theoretical is that CUPS passes the PPD's choice to the filter in
-argv[5], and then all three agree on the same item. The difference shows only if cupsd passes
-no `InputSlot` at all, and that could not be observed on this machine: cupsd cannot be run
-here (its binary is mode 0500 root:wheel) and no job history is retained, so there is nothing
-to read the real option string from. It matters for one hardware symptom, which is why it is
-recorded: **a job that prints the first page and then waits for paper would point at 4**, and
-the thing to try next is an explicit `InputSlot` choice rather than the default.
+CUPS's own manual settles it, and not in our favour. filter(7) says that "options passed on
+the command-line typically do not include the default choices [of] the printer's PPD file",
+and it tells a filter to take them from the file - which CUPS hands it in `PPD` - through
+`ppdMarkDefaults` and `ppdFindMarkedChoice`, the two functions HP's driver imports. So the
+command line is not carrying the defaults, and a job that named no options sent our 1 where
+HP sends the PPD's 4.
+
+That is now fixed rather than documented. The filter reads the PPD's defaults for the five
+options it maps - media source, duplex, econo mode, density, jam recovery - and then lets the
+command line override them, which is the order the interface describes. On this printer it
+changes exactly one item, `ZJI_DMDEFAULTSOURCE`, from 1 to 4 by default. A PPD that cannot be
+read is not fatal: the built-in defaults stand, as they did before. Unit tests cover the
+reading, and the rehearsal checks the real PPD - with `PPD` set and no options the page carries
+4, and with `InputSlot=Upper` on the command line it carries 1 again.
+
+Page size, media type and resolution need none of this: the raster page header already reflects
+the PPD's defaults for those, which is where the interface says a raster filter should look.
 
 ## What settles the unverified items
 
@@ -275,7 +285,7 @@ Each one maps to an observation the hardware test makes:
 | 4, command path | absent supplies reporting is visible in the print dialog, not in printing |
 | 5, duplex | send a three-page job with `Duplex=DuplexNoTumble`: the printer should prompt to flip the stack ("press the Go button"), and two-sided output means our item-only approach is right; single-sided sheets in document order with no prompt means it needs the host-side handling both other drivers have |
 | 6, media codes | whether a non-plain-paper job prints correctly, or jams or misfeeds |
-| 10, media source | a job that prints one page and then waits for paper: try an explicit `InputSlot` rather than the default |
+| 10, media source | settled: the PPD's default is read and an explicit `InputSlot` overrides it. If a job ever prints one page and then waits for paper, the code it sends is DMBIN 4 (manual feed, the PPD's default) |
 
 Everything else that used to be listed as uncertain - the wrapper text, the item sets and
 their order, the page geometry, the JBIG configuration, the compressed image, the chunk

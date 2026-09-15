@@ -125,6 +125,19 @@ fn build_options(options: &str) -> Options {
         ),
         ..Options::default()
     };
+
+    // CUPS passes only the options this job named, so the PPD supplies the rest - it sets PPD
+    // to the queue's file for exactly this. Read it first, so the command line overrides it,
+    // which is the order the filter interface documents. A PPD we cannot read is not fatal:
+    // the built-in defaults stand, which is what happened before this existed.
+    if let Ok(path) = env::var("PPD") {
+        match fs::read_to_string(&path) {
+            Ok(text) => p1102_job::apply_ppd_defaults(&mut opts, &text),
+            Err(e) => {
+                eprintln!("p1102-filter: cannot read PPD {path}: {e}; using built-in defaults")
+            }
+        }
+    }
     p1102_job::apply_ppd_options(&mut opts, options);
 
     for token in options.split_whitespace() {

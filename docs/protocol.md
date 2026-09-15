@@ -522,6 +522,23 @@ printer agrees with HP's codes for the non-default media; that needs hardware.
 Input format for our filter is therefore **8 bits per pixel, 1 colour, colour space 0
 (grayscale)**: thresholding gray to 1 bpp, no colour handling and no dithering needed.
 
+## Where the options come from
+
+Two places, merged in this order:
+
+1. **The PPD**, which CUPS hands the filter in the `PPD` environment variable. A filter is
+   expected to read the defaults it is not sent - CUPS's own filter(7) says the options string
+   "typically do[es] not include the default choices [of] the printer's PPD file" and points at
+   `ppdMarkDefaults` and `ppdFindMarkedChoice`, which is what HP's driver imports and what
+   `p1102_job::apply_ppd_defaults` does here for the five options this filter maps.
+2. **argv[5]**, the options the job itself named, which override the file. Both the PPD
+   spelling (`Duplex=DuplexNoTumble`) and the IPP one (`sides=two-sided-long-edge`) are
+   accepted, because the same manual warns that a filter may see either.
+
+Geometry, page size and media type come from neither: the raster page header carries them, and
+already reflects the PPD's defaults for those, which is where the interface says a raster
+filter should read them.
+
 ## USB
 
 **CONFIRMED** the PPD's `1284DeviceID` is

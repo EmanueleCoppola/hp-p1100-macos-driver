@@ -182,6 +182,22 @@ def check_levers(raster_path, options, work, zc):
         raise Lever('P1102_ECONOMODE=1 did not set the PJL line')
     lines.append('P1102_ECONOMODE=1: the page item and the PJL line both say so')
     lines.append('P1102_RAW=1: covered by the payload check when the rehearsal runs --raw')
+
+    # CUPS hands a filter the queue's PPD in PPD and sends only the options the job named, so
+    # the filter is expected to take the rest from the file. On this printer the visible one is
+    # the media source: the PPD's default is Manual (4) where our built-in default is 1.
+    if os.path.exists(PPD):
+        items = {}
+        for kind, event in zc.semantic_view(job_with({'PPD': PPD}, 'ppd-defaults'))['events']:
+            if kind == 'chunk' and event['op'] == 'START_PAGE':
+                items = event['items']
+                break
+        got = str(items.get('DMDEFAULTSOURCE')).split()[0]
+        if got != '4':
+            raise Lever('with PPD set, the media source should be the PPD default (Manual, 4), '
+                        'but the job has %r' % items.get('DMDEFAULTSOURCE'))
+        lines.append('PPD: the file\'s own default media source (Manual, 4) is used when the '
+                     'command line says nothing')
     return lines
 
 
