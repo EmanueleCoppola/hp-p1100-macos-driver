@@ -40,11 +40,15 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 # Geometry that matches what the printer's own PPD produces at 600 dpi, so a test job has
-# exactly the page image a real job would have. Measured from cgpdftoraster output.
+# exactly the page image a real job would have. These are the raster's dimensions, which are the
+# PPD's *ImageableArea* with its 12 pt margins taken off, not its *PaperDimension*: for Legal
+# that is 588 x 984 pt, 4900 x 8200 px. Measured from cgpdftoraster output, and held to it by
+# scripts/bringup-compare.py - which is how the Legal height here was found to be the paper's
+# 8100 rather than the 8200 a real job carries.
 PAGES = {
     'letter': (4900, 6400, 612, 792, 1),   # DMPAPER_LETTER
     'a4': (4758, 6817, 595, 842, 9),       # DMPAPER_A4
-    'legal': (4900, 8100, 612, 1008, 5),   # DMPAPER_LEGAL
+    'legal': (4900, 8200, 612, 1008, 5),   # DMPAPER_LEGAL
 }
 
 DEFAULT_DPI = 600

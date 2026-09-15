@@ -170,6 +170,7 @@ correctness against the references:
   whole job vs the reference driver        ok
   JBIG encoder vs the reference            ok
   two-bit path vs the reference            ok
+  bring-up jobs vs the shipped framing     ok
 
 the CUPS boundary, and the shape of the install:
   rehearsal, JBIG path                     ok
@@ -699,6 +700,40 @@ The one step it cannot reach is the strict cupstestppd run, whose two file check
 files. That waits for the install that needs sudo. The evidence it will pass is the same check run
 against root-owned stand-ins at the modes this installer uses: HP's own filter and icon, with
 `/usr/bin/true` in the filter's place, pass it.
+
+## The bring-up jobs, against the shipped framing
+
+scripts/make-test-job.py is the tool a hardware session reaches for first, and its whole point is
+that a rejection cannot be blamed on our compressor: it draws a pattern, compresses it with the
+reference encoder, and frames a job around it. That makes a defect in its *framing* expensive,
+because the conclusion it would produce is the wrong one - "the printer does not accept our
+protocol". The framing in it is Python, mirroring crates/p1102-protocol, and nothing was comparing
+the two.
+
+`scripts/bringup-compare.py` does, for the same page image: it builds the job with
+make-test-job.py, re-encodes the same PBM with the same reference encoder, has `p1102 wrap` - the
+Rust framing - build the job around that image, and asks `p1102 test-page`, the CLI's own drawing
+and framing, for the same pattern. All three come out **byte-identical**, not merely equivalent, in
+all ten cases: six cheap patterns plus gray and checker on Letter, and one pattern each on A4 and
+Legal. Job B is handed its geometry, paper code and image from job A, so what that comparison tests
+is the framing: chunk sequence, item sets, order, padding. Job C draws its own bitmaps, so it tests
+the drawing too, and it is what caught the CLI's page table carrying the same wrong Legal height -
+had only the Python table been fixed, the two Rust tools would have stopped agreeing with it. The
+two slow patterns are the noisy ones, where the reference encoder has real work to do; they are
+also the two whose jobs would differ most visibly if the framing drifted.
+
+The other half tests the numbers, which the framing comparison cannot: what a test page claims
+about the page is compared with the job the filter builds from a real CUPS raster of the same page
+size. That is where the Legal entry in both bring-up tables - make-test-job.py's and the CLI's -
+carried the paper's height, 8100 px, instead of the imageable area's 8200 px: the raster from
+cgpdftoraster is 4900x8200, and so is the reference driver's job, because 12 pt comes off each edge
+(588 x 984 pt). A Legal test page would have printed 100 px short of a real one. Letter and A4
+were right, and are checked the same way now.
+
+Both halves are negative-controlled: putting the 8100 back in either implementation fails the
+geometry comparison with `RASTER_Y: the test page says 8100, a real page says 8200` (in the CLI's
+case as `test-page DIFFERENT`), and changing the tool's default print density fails the framing
+comparison on the PJL line that carries it.
 
 ## Golden-master comparison: what was intended, and what was done
 

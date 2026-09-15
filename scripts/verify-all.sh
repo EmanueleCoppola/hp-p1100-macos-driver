@@ -11,7 +11,9 @@
 #
 # Usage:
 #   scripts/verify-all.sh            every check
-#   scripts/verify-all.sh --quick    everything except the reference comparison and the sweep
+#   scripts/verify-all.sh --quick    everything except the comparisons against the references:
+#                                    the reference driver, the JBIG encoder, the two-bit path,
+#                                    the sweep, and the bring-up jobs
 #
 # What it deliberately does not do: install anything, create a queue, use sudo, or talk to a
 # printer. Those need the hardware or an administrator and are described in docs/testing.md.
@@ -73,6 +75,7 @@ else
     run 'whole job vs the reference driver' "$PY" scripts/reference-compare.py
 run 'JBIG encoder vs the reference' "$PY" scripts/jbig-sweep.py
 run 'two-bit path vs the reference' "$PY" scripts/two-bit-compare.py
+run 'bring-up jobs vs the shipped framing' "$PY" scripts/bringup-compare.py
 fi
 echo
 echo 'the CUPS boundary, and the shape of the install:'
