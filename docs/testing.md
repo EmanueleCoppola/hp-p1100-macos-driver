@@ -172,6 +172,65 @@ the library HP itself bundled, which is what makes it the right reference.
 
 ## Hardware bring-up with no build at all
 
+### Pre-flight, the moment the printer is attached
+
+`scripts/preflight-usb.py` reports what the machine can see, read-only and with no
+privileges, so the first hardware moment is diagnostic rather than guesswork:
+
+```bash
+PY=/opt/homebrew/bin/python3.13
+$PY scripts/preflight-usb.py
+$PY scripts/preflight-usb.py --all        # every USB device, not just printers and hubs
+```
+
+It answers the four questions that decide what to do next:
+
+- is a USB Printer-class device attached at all (interface class 7, or a Hewlett-Packard
+  `03f0:` vendor id);
+- does its serial number match the one the queue's device URI asks for? The `usb` backend
+  matches on exactly that, so a second printer with the same name is reported as a
+  mismatch instead of silently printing nowhere;
+- which interfaces and how many endpoints it presents. Two on a bidirectional printer
+  interface is what the backchannel needs; fewer is called out;
+- which filters the queue names, whether they exist, and whether their architectures can
+  run here - which is the question the whole project exists to answer.
+
+Interfaces are matched back to their device by `locationID`. Endpoints are reported as a
+count only: IOKit does not publish endpoint addresses as registry entries, so the script
+does not invent them. It reads `ioreg -a` rather than `system_profiler SPUSBDataType`,
+which returns nothing on this machine.
+
+Exit status is 0 when a printer-class device is attached, 1 when none is, 2 on failure, so
+it can be waited on:
+
+```bash
+until $PY scripts/preflight-usb.py >/dev/null; do sleep 5; done
+```
+
+Whether the printer re-enumerates - or comes back with a different VID/PID or serial -
+after a power cycle or a firmware download is answered by diffing two JSON runs, which is
+what `--json` is for:
+
+```bash
+$PY scripts/preflight-usb.py --json > /tmp/before.json
+# power cycle the printer
+$PY scripts/preflight-usb.py --json > /tmp/after.json
+diff /tmp/before.json /tmp/after.json
+```
+
+With no printer attached it exits 1 and says so, but still reports the CUPS side, which is
+useful on its own:
+
+```text
+  HP_LaserJet_Professional_P1102
+    device   usb://Hewlett-Packard/HP%20LaserJet%20Professional%20P1102?serial=000000000Q80E182PR1a
+    wants    serial 000000000Q80E182PR1a
+    filter   x86_64   .../hpRaster.bundle/Contents/MacOS/rastertozjs  <- Intel-only, cannot run here
+  no USB Printer-class device and no Hewlett-Packard device is attached.
+```
+
+### Bring-up with no build and no install
+
 Both blockers on hardware testing - the Xcode licence and the missing printer - are worth
 clearing, but the first test needs neither, because a complete job can be produced without
 compiling and delivered without installing:

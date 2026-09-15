@@ -37,6 +37,12 @@ The same PPD is also shipped by Apple at
 targets, `FileVersion 6.9`), so the installed queue and Apple's template agree on
 the driver path.
 
+The PPD carries six `*1284DeviceID` lines, one per model in the series it covers
+(P1102, P1104, P1106, P1107, P1108, P1109) and a matching `*Product` line for each. One
+PPD therefore serves the whole family, and the model is selected by matching the attached
+device's own 1284 identity against those lines rather than by a different file. Only the
+P1102 line matters here, and it is the one the queue's device URI agrees with.
+
 ## The actual pipeline (CONFIRMED)
 
 ```text

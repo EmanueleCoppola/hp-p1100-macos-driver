@@ -157,6 +157,7 @@ same licence gate.
     $PY scripts/zjs-compare.py a.zjs b.zjs      # semantic job comparison
     ./scripts/verify-native.sh                  # ARM64 check for our binaries
     $PY scripts/rehearse-job.py                 # rehearse the CUPS -> filter boundary
+    $PY scripts/preflight-usb.py                # what the USB bus and CUPS see, read-only
 
 The real tool can also be built and run without a compiler, because wasm links with Rust's
 own linker and needs no SDK:
@@ -231,8 +232,10 @@ Not verified:
 ## Next steps
 
 1. Re-accept the Xcode licence and confirm cargo build emits an ARM64 binary.
-2. Attach the P1102; record ioreg USB descriptors, VID/PID, endpoints, interface class, and
-   whether the device re-enumerates after a power cycle.
+2. Attach the P1102 and run `scripts/preflight-usb.py`. It reports VID/PID, serial,
+   interface class and endpoint count, checks the serial against the one the queue asks
+   for, and - by diffing two `--json` runs across a power cycle - whether the device
+   re-enumerates with a different identity.
 3. Send a minimal page. The default path is now JBIG-compressed, so the first question is
    simply whether a page prints; `P1102_RAW=1` switches the filter to the uncompressed
    ZJT_RAW_IMAGE form if the compressed one is rejected.
