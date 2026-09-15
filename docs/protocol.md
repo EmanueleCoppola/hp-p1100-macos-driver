@@ -5,9 +5,10 @@ independent sources), **LIKELY** (strong inference), **UNKNOWN** (open).
 
 ## Headline
 
-**CONFIRMED** The HP LaserJet Professional P1102 speaks **Zenographics ZjStream**
+**CONFIRMED** HP's host-based LaserJets of this family speak **Zenographics ZjStream**
 ("ZJS"), framed in PJL, with **JBIG (ISO/IEC 11544 / ITU-T T.82)** bi-level compression
-for the page raster.
+for the page raster. Everything here was confirmed on the HP LaserJet Professional P1102,
+the reference model of the P1100 family this driver targets.
 
 Two independent sources agree on the format:
 
@@ -24,7 +25,7 @@ repository; see `docs/research.md`.
 
 ## Job framing
 
-The reference framing for the P1102-class models (HP1020 / HP Pro P1102 / P1566 /
+The reference framing for this class of host-based models (HP1020 / HP Pro P1102 / P1566 /
 P1606dn) is a PJL wrapper around one ZJS stream:
 
 ```text
@@ -93,7 +94,7 @@ offset size field      meaning
 
 `reserved` was observed to equal the total byte length of the following item records,
 i.e. `12 * items` for all-`uint32` item sets, and `0` when there are no items. The
-P1102-class path uses `reserved = 12 * items`. **LIKELY** it is a consistency field.
+path these models use carries `reserved = 12 * items`. **LIKELY** it is a consistency field.
 
 `items` acts as a count for most record types; the JBIG records
 (`ZJT_JBIG_BIH`, `ZJT_JBIG_BID`, `ZJT_END_JBIG`) always pass `items = 0` and put their
@@ -135,7 +136,7 @@ offset size field    meaning
 | 12 | `ZJT_2600N` | HP 2600n specific |
 | 13,14,15 | `ZJT_ZX_0x0d/0e/0f` | ZX specific |
 
-For our monochrome P1102 only 0-10 are relevant.
+For the monochrome output this driver emits only 0-10 are relevant.
 
 ## Item tags (`ZJ_ITEM`)
 
@@ -173,7 +174,7 @@ There are also HP-specific tags (`ZJI_HP_CDOTS`..`ZJI_HP_KWHITE`, 0x8200-0x8207)
 tags (0x6c-0x6f). Their mapping onto HP's macOS property names `ZxBits`, `colorFormat`,
 `colorSize`, `minAtMove`, `maxAtMove` is **LIKELY** but unverified.
 
-## What the P1102 actually needs
+## What the driver emits
 
 The reference implementation drives the P1102 as model `2` with flags `-P -z2 -L0`:
 
@@ -311,7 +312,7 @@ whether the device accepts it - the reference driver does not emit raw images, s
 runnable confirms it end to end - and whether HP adds an item we do not, since the call
 that opens the chunk passes only the opcode. If the P1102 accepts raw, it removes the JBIG
 dependency for a first version; that is a hardware question, and `make-test-job.py --raw` and
-`P1102_RAW=1` both exist to answer it.
+`P1100_RAW=1` both exist to answer it.
 
 ## Byte order caveat
 
@@ -444,7 +445,7 @@ firmware to this model either, which is why nothing in this stack does.
 ## CUPS raster, the input side
 
 Our filter is handed `application/vnd.cups-raster`. Measurements from
-`/usr/sbin/cupsfilter -m application/vnd.cups-raster -p <p1102 ppd>` on one-page text
+`/usr/sbin/cupsfilter -m application/vnd.cups-raster -p <p1100 ppd>` on one-page text
 (CONFIRMED):
 
 | quantity | value |
@@ -558,7 +559,7 @@ Two places, merged in this order:
    expected to read the defaults it is not sent - CUPS's own filter(7) says the options string
    "typically do[es] not include the default choices [of] the printer's PPD file" and points at
    `ppdMarkDefaults` and `ppdFindMarkedChoice`, which is what HP's driver imports and what
-   `p1102_job::apply_ppd_defaults` does here for the five options this filter maps.
+   `p1100_job::apply_ppd_defaults` does here for the five options this filter maps.
 2. **argv[5]**, the options the job itself named, which override the file. Both the PPD
    spelling (`Duplex=DuplexNoTumble`) and the IPP one (`sides=two-sided-long-edge`) are
    accepted, because the same manual warns that a filter may see either.

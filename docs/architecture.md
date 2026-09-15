@@ -2,8 +2,10 @@
 
 ## What has to be true
 
-The replacement must: drive the P1102; be ARM64 with no Rosetta; be buildable from
-source here; keep the raster/protocol logic separate from CUPS, USB and packaging; and
+The replacement must: drive the HP LaserJet Professional P1100 family, of which the P1102
+attached to this Mac is the model this implementation was verified against; be ARM64 with
+no Rosetta; be buildable from source here; keep the raster/protocol logic separate from
+CUPS, USB and packaging; and
 not sit on something macOS is actively deleting.
 
 ## The decisive constraint we measured
@@ -110,13 +112,13 @@ invoked, move the same library behind an IPP Printer Application.
 ## Shape of the code
 
 ```text
-crates/p1102-protocol   ZjStream encoder + decoder. Pure. No I/O, no deps.
+crates/p1100-protocol   ZjStream encoder + decoder. Pure. No I/O, no deps.
                         Owns the wire format and its golden tests.
-crates/p1102-raster     CUPS raster reader + 8-bit gray -> 1 bpp. Pure. No libcups.
-crates/p1102-job        Raster stream -> printer job, a page at a time. Pure. No CUPS.
-crates/p1102-filter     The CUPS filter binary: a thin argv/stdin/stdout wrapper
-                        around p1102-job. This is the only CUPS-aware code.
-crates/p1102-cli        Offline tooling: inspect rasters, dump streams, encode a job
+crates/p1100-raster     CUPS raster reader + 8-bit gray -> 1 bpp. Pure. No libcups.
+crates/p1100-job        Raster stream -> printer job, a page at a time. Pure. No CUPS.
+crates/p1100-filter     The CUPS filter binary: a thin argv/stdin/stdout wrapper
+                        around p1100-job. This is the only CUPS-aware code.
+crates/p1100-cli        Offline tooling: inspect rasters, dump streams, encode a job
                         without involving CUPS at all.
 ```
 
@@ -125,7 +127,7 @@ raster and protocol, and raster and protocol depend on nothing. That is what let
 layer below the filter be exercised with a printer and a CUPS installation nowhere in
 sight, which is the property that made this testable on this machine at all.
 
-`p1102-usb` does not exist and is not currently needed: Apple's `usb` backend is already
+`p1100-usb` does not exist and is not currently needed: Apple's `usb` backend is already
 native, and the filter writes to stdout for CUPS to hand to it.
 
 **The filter streams.** It reads the raster one page at a time and hands each page's chunks to
@@ -147,7 +149,7 @@ measured the same way for all three sizes - a ten times larger job costs 0.3% mo
 the property is flatness rather than a single figure. Reproduce it with a multi-page raster:
 
 ```bash
-/usr/bin/time -l target/release/p1102-filter 1 manu m 1 '' /tmp/ten-page.raster > /dev/null
+/usr/bin/time -l target/release/p1100-filter 1 manu m 1 '' /tmp/ten-page.raster > /dev/null
 ```
 
 `scripts/memory-check.py` does that comparison as a check rather than an observation: it builds a
@@ -168,13 +170,13 @@ reports why".
 
 ## Installation shape
 
-The filter, a generated PPD and the printer icon go into `/Library/Printers/p1102/`, and a **new** queue is
+The filter, a generated PPD and the printer icon go into `/Library/Printers/p1100/`, and a **new** queue is
 created alongside HP's rather than replacing it. HP's installation is read but never
 written. See `docs/installation.md`.
 
 ## Remaining technical risk
 
-**The compressor is no longer the gap.** JBIG is implemented in `crates/p1102-jbig` and its
+**The compressor is no longer the gap.** JBIG is implemented in `crates/p1100-jbig` and its
 output is byte-identical to the reference implementation of the standard: four embedded
 golden vectors, a 42-comparison sweep, and - the one that covers the whole path - the page
 images inside jobs that `scripts/reference-compare.py` matches against the reference driver
@@ -190,8 +192,8 @@ and the layout CUPS applies before rasterising. The comparison is
 `scripts/reference-compare.py`, and what it cannot cover is listed in `docs/differences.md`.
 
 The uncompressed `ZJT_RAW_IMAGE` path is also implemented and selectable with
-`P1102_RAW=1`, because whether the printer accepts it is still an open hardware question
-and it is a useful fallback to have. `p1102-job` prepares the same 1 bpp bitmap either way,
+`P1100_RAW=1`, because whether the printer accepts it is still an open hardware question
+and it is a useful fallback to have. `p1100-job` prepares the same 1 bpp bitmap either way,
 so choosing between the two encoders touches no other layer.
 
 What remains is therefore hardware validation, not design or implementation:

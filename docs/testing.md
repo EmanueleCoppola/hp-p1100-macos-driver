@@ -91,7 +91,7 @@ clang works and rust-lld does not.
 
 **The fix, and it works.** `scripts/make-stub-sdk.py` writes a link-only copy of the SDK's
 stubs with the offending entries removed from their target lists - non-destructive, in
-`~/.cache/p1102-stub-sdk`, nothing outside that directory is touched. For an arm64 link those
+`~/.cache/p1100-stub-sdk`, nothing outside that directory is touched. For an arm64 link those
 entries never apply anyway, so the symbol sets are the ones Apple's linker would use. Then:
 
 ```bash
@@ -101,8 +101,8 @@ scripts/build-native.sh          # picks the route and says which one it used
 produces ordinary native binaries:
 
 ```text
-target/release/p1102:        Mach-O 64-bit executable arm64
-target/release/p1102-filter: Mach-O 64-bit executable arm64
+target/release/p1100:        Mach-O 64-bit executable arm64
+target/release/p1100-filter: Mach-O 64-bit executable arm64
 ```
 
 Linking against stubs only describes the library at link time; the binary imports the real
@@ -121,7 +121,7 @@ not been accepted. Both routes run the same suite:
 
 ```bash
 ./scripts/test-native.sh                 # native; the same suite test-wasm.sh runs
-./scripts/test-native.sh -p p1102-jbig   # anything cargo test takes
+./scripts/test-native.sh -p p1100-jbig   # anything cargo test takes
 ```
 
 `scripts/test-wasm.sh` runs the same suite on wasm32-wasip1, which links with Rust's own
@@ -359,7 +359,7 @@ In order, once the printer is on the desk:
 
 1. `scripts/preflight-usb.py` - what the machine and CUPS can see, read-only, and
    the first thing to run.
-2. `p1102 send /tmp/square.zjs` (or the two-line backend invocation below) - a real
+2. `p1100 send /tmp/square.zjs` (or the two-line backend invocation below) - a real
    page through the transport a queue uses: no build, no install, no administrator.
 3. the raw queue below, if the page printed but the whole CUPS path still needs checking - the
    one step here that wants `sudo`.
@@ -456,7 +456,7 @@ DEV=$(lpstat -v HP_LaserJet_Professional_P1102 | sed -n 's/^device for [^:]*: //
 DEVICE_URI="$DEV" /usr/libexec/cups/backend/usb 1 "$USER" bring-up 1 '' /tmp/square.zjs
 ```
 
-The same job in one command, reading the device URI from the queue unless `--device` says otherwise, and with a limit so it cannot sit there retrying: `p1102 send /tmp/square.zjs` gives up after `--timeout` seconds (60 by default).
+The same job in one command, reading the device URI from the queue unless `--device` says otherwise, and with a limit so it cannot sit there retrying: `p1100 send /tmp/square.zjs` gives up after `--timeout` seconds (60 by default).
 
 The backend line is the same transport a queue would use. A CUPS backend takes its device
 URI from `argv[0]` - or, as here, from `DEVICE_URI` - and reads the job from the file argument
@@ -473,10 +473,10 @@ and the transport but not CUPS's chain from the PPD through the filter. That is 
 queue below is for, and it does need administrator access:
 
 ```bash
-sudo lpadmin -p P1102_raw -E -v "$DEV" -m raw
-lp -d P1102_raw -o raw /tmp/square.zjs
-lpstat -o P1102_raw
-sudo lpadmin -x P1102_raw          # remove the test queue again
+sudo lpadmin -p P1100_raw -E -v "$DEV" -m raw
+lp -d P1100_raw -o raw /tmp/square.zjs
+lpstat -o P1100_raw
+sudo lpadmin -x P1100_raw          # remove the test queue again
 ```
 
 `-m raw` selects the "Raw Queue" model: no PPD, no filters, and the bytes go to the printer
@@ -522,7 +522,7 @@ python3 scripts/cupsraster.py scan /tmp/1p.raster
 
 Measured results are recorded in `docs/protocol.md`.
 
-`scripts/cupsraster.py` implements the same walk as `crates/p1102-raster` and is used as
+`scripts/cupsraster.py` implements the same walk as `crates/p1100-raster` and is used as
 a cross-check against real captured rasters; both agree, and both land exactly on EOF for
 1-, 2- and 3-page jobs, which is what validates the empirically derived header offsets.
 
@@ -531,7 +531,7 @@ tone table, item 11 of `docs/differences.md` - the same backend invocation takes
 and the README's "Making a two-bit page, the way HP's driver would" section is how it is built:
 the tone tables come out of the installed HP driver, the page is screened with them, and the
 image is framed with the page items that depth implies. One command does all of it -
-`p1102 raster-to-zjs RASTER OUT.zjs --2bit --tone-table /tmp/twobit/sdtahs10.bin` - and the
+`p1100 raster-to-zjs RASTER OUT.zjs --2bit --tone-table /tmp/twobit/sdtahs10.bin` - and the
 longer recipe in the README, which uses the reference encoder as well, is what
 `scripts/two-bit-compare.py` holds that command to. That job is the one thing that settles
 whether the printer wants it.
@@ -559,10 +559,10 @@ and the result is judged by the reference decoder. A passing run:
     4. the job carries 1 compressed page image(s) for 1 raster page(s)
     5. reference decoder vs the independently computed bitmap: pixels identical (4992x6400, 3993600 bytes)
     6. bring-up levers, the overrides the hardware notes tell you to reach for:
-       P1102_NO_PJL=1: the job starts at the signature, with no wrapper
-       P1102_DENSITY=5: the prologue carries DENSITY=5
-       P1102_ECONOMODE=1: the page item and the PJL line both say so
-       P1102_RAW=1: covered by the payload check when the rehearsal runs --raw
+       P1100_NO_PJL=1: the job starts at the signature, with no wrapper
+       P1100_DENSITY=5: the prologue carries DENSITY=5
+       P1100_ECONOMODE=1: the page item and the PJL line both say so
+       P1100_RAW=1: covered by the payload check when the rehearsal runs --raw
 
 It covers the things that are easy to get wrong and hard to notice: that the filter reads
 its raster from stdin as well as from a file argument, that PPD options reach both the page
@@ -627,7 +627,7 @@ DEBUG: argv[3]=<title>        DEBUG: argv[4]="1"        DEBUG: argv[5]=<options>
 DEBUG: argv[6]=<input file>
 ```
 
-That is exactly what p1102-filter implements: options at argv[5], the input file at argv[6],
+That is exactly what p1100-filter implements: options at argv[5], the input file at argv[6],
 and stdin when there is no file. The rehearsal now runs the raster both ways and requires the
 same job from each, which is what would catch a dependence on the input being seekable. The
 option strings come from the printer's real PPD, so the remaining untested piece is narrow:
@@ -671,7 +671,7 @@ character on line 1"). Its presence on macOS was assumed away once; it is there.
 
 CUPS's conformance test runs in both places, with different strictness. `scripts/ppd-compare.py`
 runs it with its two file checks ignored, since nothing is installed under
-`/Library/Printers/p1102` while a developer runs it; install.sh runs it strictly once the filter
+`/Library/Printers/p1100` while a developer runs it; install.sh runs it strictly once the filter
 and the icon are in place. Those two checks ask for ownership rather than a mode - a copy of the
 filter at 0755 in a temporary directory fails them, HP's own root-owned pair passes - which is
 what `install -o root -g wheel` provides. That test is also what requires the option we add to
@@ -685,7 +685,7 @@ thirty-nine translation lines rather than three.
 tone tables read out of HP's driver, the PPD written into the destination, the checks run on it,
 and then uninstall.sh taking the lot away again. It checks what landed - five files, the filter
 and the icon byte-identical to the build, both tone tables at their 12288 bytes, and the PPD's
-filter and icon paths inside the destination - what did not happen (`/Library/Printers/p1102`
+filter and icon paths inside the destination - what did not happen (`/Library/Printers/p1100`
 not created, the HP queue's device unchanged, no queue created) and that nothing is left behind.
 
 It also runs the refusals, because the uninstall ends in a recursive delete of a path taken from
@@ -707,12 +707,12 @@ scripts/make-test-job.py is the tool a hardware session reaches for first, and i
 that a rejection cannot be blamed on our compressor: it draws a pattern, compresses it with the
 reference encoder, and frames a job around it. That makes a defect in its *framing* expensive,
 because the conclusion it would produce is the wrong one - "the printer does not accept our
-protocol". The framing in it is Python, mirroring crates/p1102-protocol, and nothing was comparing
+protocol". The framing in it is Python, mirroring crates/p1100-protocol, and nothing was comparing
 the two.
 
 `scripts/bringup-compare.py` does, for the same page image: it builds the job with
-make-test-job.py, re-encodes the same PBM with the same reference encoder, has `p1102 wrap` - the
-Rust framing - build the job around that image, and asks `p1102 test-page`, the CLI's own drawing
+make-test-job.py, re-encodes the same PBM with the same reference encoder, has `p1100 wrap` - the
+Rust framing - build the job around that image, and asks `p1100 test-page`, the CLI's own drawing
 and framing, for the same pattern. All three come out **byte-identical**, not merely equivalent, in
 all ten cases: six cheap patterns plus gray and checker on Letter, and one pattern each on A4 and
 Legal. Job B is handed its geometry, paper code and image from job A, so what that comparison tests
@@ -773,8 +773,8 @@ Native builds work now, so this is a convenience rather than a necessity - but i
 what makes the job pipeline testable on a machine with no linker at all.
 
 ```bash
-cargo build --target wasm32-wasip1 -p p1102-cli --offline
-node scripts/wasi-run.mjs target/wasm32-wasip1/debug/p1102.wasm test-page square --page a4 -o /tmp/out.zjs
+cargo build --target wasm32-wasip1 -p p1100-cli --offline
+node scripts/wasi-run.mjs target/wasm32-wasip1/debug/p1100.wasm test-page square --page a4 -o /tmp/out.zjs
 ```
 
 scripts/wasi-run.mjs exposes the host root at the guest root, so the tool sees the same
@@ -782,7 +782,7 @@ files the native build would. A second runtime is available as a fallback, and i
 reliable of the two:
 
 ```bash
-wasmtime run --dir / target/wasm32-wasip1/debug/p1102.wasm raster-info big.raster
+wasmtime run --dir / target/wasm32-wasip1/debug/p1100.wasm raster-info big.raster
 ```
 
 This is a development and verification path, not the deliverable: what ships is the native
@@ -812,7 +812,7 @@ memory ceiling:
 - **wasmtime runs the identical module and input to completion with correct output.**
 
 Use wasmtime for large inputs and node for everything else. scripts/wasi-run.mjs accepts
-P1102_WASI_DEBUG=1 to report the guest's exit code, which is what distinguished "the guest
+P1100_WASI_DEBUG=1 to report the guest's exit code, which is what distinguished "the guest
 exited 139" from "node died".
 
 ## Verifying "native ARM64"
@@ -837,8 +837,8 @@ ways: HP's `rastertozjs` and `usbink` are reported `INTEL` and fail, while Apple
 
 ```text
 ./scripts/verify-native.sh
-  p1102                  native   Mach-O 64-bit executable arm64
-  p1102-filter           native   Mach-O 64-bit executable arm64
+  p1100                  native   Mach-O 64-bit executable arm64
+  p1100-filter           native   Mach-O 64-bit executable arm64
   OK: nothing Intel-only found.
 ```
 
@@ -861,8 +861,8 @@ reproducing it needs no flags:
 ```bash
 PY=/opt/homebrew/bin/python3.13
 $PY scripts/make-test-job.py --pattern square --page a4 --timestamp 19700101000000 -o /tmp/py.zjs
-target/release/p1102 test-page square --page a4 -o /tmp/native.zjs
-node scripts/wasi-run.mjs target/wasm32-wasip1/debug/p1102.wasm test-page square --page a4 -o /tmp/wasm.zjs
+target/release/p1100 test-page square --page a4 -o /tmp/native.zjs
+node scripts/wasi-run.mjs target/wasm32-wasip1/debug/p1100.wasm test-page square --page a4 -o /tmp/wasm.zjs
 cmp /tmp/py.zjs /tmp/native.zjs && cmp /tmp/py.zjs /tmp/wasm.zjs
 ```
 
