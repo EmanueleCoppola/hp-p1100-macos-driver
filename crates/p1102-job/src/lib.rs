@@ -1140,6 +1140,43 @@ mod tests {
         assert_eq!(chunks.last().unwrap().header.ty, pop::END_DOC);
     }
 
+    /// A document can mix page sizes - a Letter cover sheet and A4 body pages, say - and each
+    /// page carries its own geometry, because CUPS sends a page header per page. Getting this
+    /// wrong would put every page on the first page's paper, which on a printer that acts on
+    /// the code would be felt rather than seen.
+    #[test]
+    fn a_document_can_mix_page_sizes() {
+        let r = raster(&[(8, 2, "Letter"), (16, 4, "A4"), (8, 2, "B5JIS")]);
+        let job = encode_raster_job(&r, &Options::default()).unwrap();
+        let chunks = decode(zjs_body(&job)).unwrap();
+        let pages: Vec<&Vec<p1102_protocol::DecodedItem>> = chunks
+            .iter()
+            .filter(|c| c.header.ty == pop::START_PAGE)
+            .map(|c| &c.items)
+            .collect();
+        assert_eq!(pages.len(), 3);
+        let codes: Vec<u32> = pages
+            .iter()
+            .map(|items| item_value(items, p1102_protocol::item::DMPAPER))
+            .collect();
+        assert_eq!(
+            codes,
+            vec![paper::LETTER, paper::A4, paper::B5],
+            "each page keeps the code for its own size"
+        );
+        // The raster dimensions follow the same per-page header.
+        let widths: Vec<u32> = pages
+            .iter()
+            .map(|items| item_value(items, p1102_protocol::item::RASTER_X))
+            .collect();
+        assert_eq!(widths, vec![8, 16, 8]);
+        let heights: Vec<u32> = pages
+            .iter()
+            .map(|items| item_value(items, p1102_protocol::item::RASTER_Y))
+            .collect();
+        assert_eq!(heights, vec![2, 4, 2]);
+    }
+
     #[test]
     fn raw_image_payload_is_the_aligned_bitmap() {
         let r = raster(&[(8, 2, "Letter")]);

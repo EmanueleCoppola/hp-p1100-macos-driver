@@ -252,6 +252,14 @@ It also covers the things CUPS does to a job *before* rasterising it, because th
 filter only as pixels: landscape, a page rotated 180 degrees, and two pages on one sheet. Each
 is a case where the driver has nothing to do and a chance to get it wrong anyway.
 
+A document that mixes page sizes is covered too - a Letter cover and A4 body pages, say - since
+each raster page carries its own header and therefore its own geometry. A unit test keeps each
+page's `Zji_Dmpaper` and raster dimensions apart, and the same thing was checked end to end
+through the filter by splicing two real rasters ("Letter" then "A4"): the job came out with two
+`START_PAGE` chunks, `RASTER_X` 4900 with paper code 1 and `RASTER_X` 4758 with code 9. The
+splice is needed because `cupsfilter` cannot build a mixed-size job here - its chain has no
+PostScript-to-raster path, so the PostScript that would describe one cannot be rendered.
+
 Two things are deliberately *not* in the case list, and both are recorded in
 `docs/differences.md`: duplex (the reference reorders and rotates pages host-side, we leave
 that to the printer) and the media code (it reaches us in the raster header, which is set
