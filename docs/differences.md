@@ -449,9 +449,9 @@ padded black rather than white, where the one-bit path's padding is white and a 
 margin is not. What is still not done is putting it in the filter, because that changes what the
 queue sends by default and it depends on the framing below being settled.
 
-The item side is small but not free: `PageGeometry` in `crates/p1102-protocol` carries a
-`bits_per_pixel` that `ZJI_VIDEO_BPP` and `ZJI_VIDEO_X` are computed from, but `mono()`
-hard-codes it to 1 and nothing plumbs a depth through.
+The item side is done with it: `PageGeometry`'s `bits_per_pixel` is what `ZJI_VIDEO_BPP`,
+`ZJI_VIDEO_X` and `ZJI_NBIE` are computed from, and the job layer sets it from the same option
+that selects the screening, so a two-bit page announces itself consistently.
 
 The framing is what needs the printer. HP's page items come from `zcups::Formatter::startPage`,
 which takes the depth as its third argument and reads a `bitsPerPixel` property, and whether
