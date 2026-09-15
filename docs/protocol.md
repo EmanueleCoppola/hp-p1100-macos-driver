@@ -523,7 +523,10 @@ the PPD declares for the medium that was actually selected. For the default `Pap
 printer agrees with HP's codes for the non-default media; that needs hardware.
 
 Input format for our filter is therefore **8 bits per pixel, 1 colour, colour space 0
-(grayscale)**: thresholding gray to 1 bpp, no colour handling and no dithering needed.
+(grayscale)**, and the filter turns that into the printer's one bit. That conversion is the one
+place in this stack where a choice shows on paper rather than on the wire: HP screens the grey
+with a threshold matrix, we compare against a fixed threshold of 128, and
+`docs/differences.md` item 11 records what that changes and why HP's screen was not reproduced.
 
 ## Where the options come from
 

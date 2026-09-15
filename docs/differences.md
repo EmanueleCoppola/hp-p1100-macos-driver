@@ -307,6 +307,32 @@ reading, and the rehearsal checks the real PPD - with `PPD` set and no options t
 Page size, media type and resolution need none of this: the raster page header already reflects
 the PPD's defaults for those, which is where the interface says a raster filter should look.
 
+## 11. Grey is screened by HP and thresholded by us. CONFIRMED difference, appearance only
+
+CUPS hands the filter 8 bits per pixel of grey - the PPD asks for exactly that
+(`cupsBitsPerColor 8`, `cupsColorSpace 0`) - and something has to turn it into the printer's one
+bit. HP's filter does it with a screen: its symbols include `ProcessMonoOneBit`,
+`ProcessMonoTwoBit`, `_ScreenPixelsOneBit` and `_ScreenPixelsTwoBit`, and the one-bit path walks
+the pixels comparing each against a threshold table, packing the result with a shifting bit
+mask. We compare against a fixed threshold of 128 instead, which is what `crates/p1102-raster`
+has done since the first commit.
+
+What it changes, and what it does not: the protocol is untouched - the page is a bitmap either
+way - but the *appearance* of anything with grey in it is not. Antialiased text gets harder
+edges from us, and a photograph or a gradient gets a hard edge where HP would print a pattern
+of dots.
+
+HP's screen is not reproduced, for a reason worth stating rather than hiding: the matrix is not
+readable statically. `ProcessMonoOneBit` takes it as its `unsigned char*` argument and `main`
+passes a null there, so whatever ends up being used is resolved at runtime - a PPD attribute, or
+a default built somewhere else - and following that further stopped being worth the effort.
+Reproducing HP's halftone exactly needs it; substituting a screen of our own would be a guess
+with the same standing as the threshold, so the simpler behaviour stayed.
+
+One observation settles whether it matters: print a graded fill or antialiased text, and compare
+it with the same page through HP's queue while that still runs. If ours looks worse in a way
+someone would notice, the work is to find HP's screen rather than to invent one.
+
 ## What settles the unverified items
 
 Each one maps to an observation the hardware test makes:
@@ -319,6 +345,7 @@ Each one maps to an observation the hardware test makes:
 | 5, duplex | send a three-page job with `Duplex=DuplexNoTumble`: the printer should prompt to flip the stack ("press the Go button"), and two-sided output means our item-only approach is right; single-sided sheets in document order with no prompt means it needs the host-side handling both other drivers have |
 | 6, media codes | whether a non-plain-paper job prints correctly, or jams or misfeeds |
 | 10, media source | settled: the PPD's default is read and an explicit `InputSlot` overrides it. If a job ever prints one page and then waits for paper, the code it sends is DMBIN 4 (manual feed, the PPD's default) |
+| 11, grey conversion | print a graded fill or antialiased text: ours thresholds, HP's screens, so expect harder edges. HP's queue can be used for the comparison while it still exists |
 
 Everything else that used to be listed as uncertain - the wrapper text, the item sets and
 their order, the page geometry, the JBIG configuration, the compressed image, the chunk
