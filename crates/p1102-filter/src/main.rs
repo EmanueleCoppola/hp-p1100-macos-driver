@@ -20,8 +20,37 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use p1102_job::{encode_raster_stream, format_timestamp, ImageEncoding, Options};
 
+/// The calling convention, for the case where somebody runs this by hand rather than through
+/// CUPS.
+const USAGE: &str = "\
+usage: p1102-filter job-id user title copies options [file]
+
+This is a CUPS filter: the raster arrives on stdin, or in `file` when CUPS supplies one, and
+the encoded ZjStream job is written to stdout. `options` is CUPS's space-separated option
+string, which carries the PPD settings (Duplex=..., InputSlot=Manual, pjlDensity=...,
+EconoMode=..., pjlJamRecovery=...).
+
+To drive the pipeline outside CUPS, use the offline tools instead:
+  p1102 --help                inspect rasters, dump streams, build a test page
+  scripts/preflight-usb.py    what the USB bus and CUPS see
+  scripts/rehearse-job.py     the whole CUPS -> filter boundary, with no printer";
+
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().collect();
+    // CUPS always passes all seven arguments. A shorter one is somebody running the filter by
+    // hand, and without this guard the filter writes half a job to stdout before failing, which
+    // is a memorable way to learn the calling convention.
+    let asked_for_usage = args.get(1).is_some_and(|a| a == "-h" || a == "--help");
+    if asked_for_usage || args.len() < 6 {
+        // Requested help is not an error, and CUPS keeps stderr in the job log, so the two
+        // cases write to different streams and exit differently.
+        if asked_for_usage {
+            println!("{USAGE}");
+            return ExitCode::SUCCESS;
+        }
+        eprintln!("{USAGE}");
+        return ExitCode::from(2);
+    }
     // argv[5] is the CUPS options string, argv[6] an optional input file path.
     let options = args.get(5).cloned().unwrap_or_default();
     let input_file = args.get(6).filter(|p| !p.is_empty()).cloned();
