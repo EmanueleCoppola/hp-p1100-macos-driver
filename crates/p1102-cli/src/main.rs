@@ -242,6 +242,13 @@ fn raster_to_zjs(args: &[String]) -> Result<(), String> {
         }
     };
     let raster = read_file(inp)?;
+    // A typo must not quietly produce a default job, which is what ignoring unknown options
+    // does: the filter has the same guard for the same reason.
+    for a in args {
+        if a.starts_with('-') && !matches!(a.as_str(), "--no-pjl" | "--2bit" | "--tone-table") {
+            return Err(format!("unknown option {a:?}"));
+        }
+    }
     // --2bit screens the page through HP's own tone table instead of thresholding it, which
     // makes the job two bits per pixel. The table comes from the installed driver:
     // scripts/hp-tone-table.py --out DIR.
@@ -482,4 +489,99 @@ fn wrap(args: &[String]) -> Result<(), String> {
         bid_refs.len()
     );
     Ok(())
+}
+
+// The one test here writes files, which WASI does not support: the CLI itself runs on wasm
+// (scripts/wasi-run.mjs does exactly that), but this test is native-only.
+#[cfg(all(test, not(target_os = "wasi")))]
+mod tests {
+    use super::*;
+    use p1102_protocol::{decode, item, strip_pjl_framing};
+    use p1102_raster::{encode_page_header, PageHeader, SYNC_RASTER3};
+
+    fn tiny_raster(width: u32, height: u32, path: &str) {
+        let header = PageHeader {
+            cups_width: width,
+            cups_height: height,
+            cups_bytes_per_line: width,
+            ..PageHeader::default()
+        };
+        let mut r = SYNC_RASTER3.to_ne_bytes().to_vec();
+        r.extend_from_slice(&encode_page_header(&header));
+        r.extend((0..width * height).map(|i| (i * 8) as u8));
+        fs::write(path, &r).expect("write the raster");
+    }
+
+    /// A table of the documented shape: 256 grey levels of a 12x12 cell, four levels apart.
+    fn tone_table() -> Vec<u8> {
+        let mut t = vec![0u8; p1102_raster::TONE_TABLE_LEN];
+        for grey in 0..256usize {
+            let level = (grey / 85) as u8;
+            for row in 0..12usize {
+                for col in 0..12usize {
+                    t[grey * 48 + row * 4 + col / 4] |= level << (6 - 2 * (col % 4));
+                }
+            }
+        }
+        t
+    }
+
+    fn item_of(job: &[u8], tag: u16) -> u32 {
+        let chunks = decode(strip_pjl_framing(job)).expect("decode the job");
+        let it = chunks[1]
+            .items
+            .iter()
+            .find(|i| i.item == tag)
+            .expect("item present");
+        u32::from_be_bytes([it.payload[0], it.payload[1], it.payload[2], it.payload[3]])
+    }
+
+    /// The command line this repository documents, including the two-bit one and the ways it
+    /// is supposed to refuse: no table, and a typo.
+    #[test]
+    fn raster_to_zjs_takes_its_arguments() {
+        // A relative scratch directory, not the system temporary one: std::env::temp_dir is not
+        // implemented under WASI, and this suite runs on wasm as well as natively.
+        let dir = std::path::PathBuf::from("target/p1102-cli-test");
+        fs::create_dir_all(&dir).expect("create the scratch directory");
+        let raster = dir.join("page.raster");
+        let out = dir.join("page.zjs");
+        tiny_raster(16, 2, raster.to_str().unwrap());
+        let args = |extra: &[&str]| -> Vec<String> {
+            let mut v = vec![
+                raster.to_string_lossy().to_string(),
+                out.to_string_lossy().to_string(),
+            ];
+            v.extend(extra.iter().map(|s| s.to_string()));
+            v
+        };
+
+        raster_to_zjs(&args(&["--no-pjl"])).expect("the plain invocation");
+        let job = fs::read(&out).unwrap();
+        assert_eq!(
+            &job[..4],
+            p1102_protocol::STREAM_SIGNATURE,
+            "no PJL means the body starts at the signature"
+        );
+        assert_eq!(item_of(&job, item::VIDEO_BPP), 1);
+
+        let table = dir.join("tone.bin");
+        fs::write(&table, tone_table()).unwrap();
+        raster_to_zjs(&args(&["--2bit", "--tone-table", table.to_str().unwrap()]))
+            .expect("the two-bit invocation");
+        let job = fs::read(&out).unwrap();
+        assert_eq!(item_of(&job, item::VIDEO_BPP), 2);
+        assert_eq!(item_of(&job, item::NBIE), 2);
+        assert_eq!(
+            item_of(&job, item::VIDEO_X),
+            8,
+            "half of the sixteen-pixel width"
+        );
+
+        let err = raster_to_zjs(&args(&["--2bit"])).unwrap_err();
+        assert!(err.contains("--tone-table"), "{err}");
+        let err = raster_to_zjs(&args(&["--wat"])).unwrap_err();
+        assert!(err.contains("--wat"), "{err}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }

@@ -762,36 +762,11 @@ mod tests {
 
     fn mono_header(width: u32, height: u32, name: &str) -> PageHeader {
         PageHeader {
-            media_class: String::new(),
-            media_color: String::new(),
-            media_type: "Paper".into(),
-            output_type: String::new(),
-            hw_resolution: [600, 600],
-            margins: [12, 12],
-            num_copies: 1,
-            collate: 0,
-            duplex: 0,
-            orientation: 0,
-            page_size: [612, 792],
             cups_width: width,
             cups_height: height,
-            cups_media_type: 1,
-            cups_bits_per_color: 8,
-            cups_bits_per_pixel: 8,
             cups_bytes_per_line: width,
-            cups_color_order: 0,
-            cups_color_space: color_space::W,
-            cups_compression: compression::NONE,
-            cups_row_count: 0,
-            cups_row_feed: 0,
-            cups_row_step: 0,
-            cups_num_colors: 1,
-            cups_borderless_scaling: 1.0,
-            cups_page_size: [612.0, 792.0],
-            cups_imaging_bbox: [12.0, 12.0, 600.0, 780.0],
             cups_page_size_name: name.into(),
-            cups_marker_type: String::new(),
-            cups_rendering_intent: String::new(),
+            ..PageHeader::default()
         }
     }
 

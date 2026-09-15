@@ -159,6 +159,46 @@ impl PageHeader {
     }
 }
 
+impl Default for PageHeader {
+    /// A plausible page, so a test or a caller can set the few fields it cares about: a
+    /// 4900x6400 pixel letter page at 600 dpi, eight bits per pixel grey, one colour. The
+    /// reader overwrites every field it parses, so this never reaches a real job by accident.
+    fn default() -> Self {
+        Self {
+            media_class: String::new(),
+            media_color: String::new(),
+            media_type: "Paper".into(),
+            output_type: String::new(),
+            hw_resolution: [600, 600],
+            margins: [12, 12],
+            num_copies: 1,
+            collate: 0,
+            duplex: 0,
+            orientation: 0,
+            page_size: [612, 792],
+            cups_width: 4900,
+            cups_height: 6400,
+            cups_media_type: 1, // standard paper, the code the PPD gives plain paper
+            cups_bits_per_color: 8,
+            cups_bits_per_pixel: 8,
+            cups_bytes_per_line: 4900,
+            cups_color_order: 0,
+            cups_color_space: color_space::W,
+            cups_compression: compression::NONE,
+            cups_row_count: 0,
+            cups_row_feed: 0,
+            cups_row_step: 0,
+            cups_num_colors: 1,
+            cups_borderless_scaling: 1.0,
+            cups_page_size: [612.0, 792.0],
+            cups_imaging_bbox: [12.0, 12.0, 600.0, 780.0],
+            cups_page_size_name: "Letter".into(),
+            cups_marker_type: String::new(),
+            cups_rendering_intent: String::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RasterError {
     /// Sync word was not one this reader handles.
@@ -920,36 +960,10 @@ mod tests {
 
     fn letter_mono_header(width: u32, height: u32) -> PageHeader {
         PageHeader {
-            media_class: String::new(),
-            media_color: String::new(),
-            media_type: "Paper".into(),
-            output_type: String::new(),
-            hw_resolution: [600, 600],
-            margins: [12, 12],
-            num_copies: 1,
-            collate: 0,
-            duplex: 0,
-            orientation: 0,
-            page_size: [612, 792],
             cups_width: width,
             cups_height: height,
-            cups_media_type: 1,
-            cups_bits_per_color: 8,
-            cups_bits_per_pixel: 8,
             cups_bytes_per_line: width,
-            cups_color_order: 0,
-            cups_color_space: color_space::W,
-            cups_compression: compression::NONE,
-            cups_row_count: 0,
-            cups_row_feed: 0,
-            cups_row_step: 0,
-            cups_num_colors: 1,
-            cups_borderless_scaling: 1.0,
-            cups_page_size: [612.0, 792.0],
-            cups_imaging_bbox: [12.0, 12.0, 600.0, 780.0],
-            cups_page_size_name: "Letter".into(),
-            cups_marker_type: String::new(),
-            cups_rendering_intent: String::new(),
+            ..PageHeader::default()
         }
     }
 
