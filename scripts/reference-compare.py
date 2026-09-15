@@ -52,6 +52,13 @@ CASES = [
     ('econo mode', ['EconoMode=True'], 'EconoMode=True', ['-t'], 'text-1p.txt'),
     ('density 5', ['pjlDensity=5'], 'pjlDensity=5', ['-T', '5'], 'text-1p.txt'),
     ('manual feed', ['InputSlot=Manual'], 'InputSlot=Manual', ['-s', '4'], 'text-1p.txt'),
+    # Media type travels PPD -> page device -> raster header -> ZJI_DMMEDIATYPE, and the
+    # reference takes the same code as a flag. Transparency is the choice the PPD's own
+    # default is not, and 282 (mid-weight) is a code the reference's help text does not list
+    # while its table accepts it - so the case covers the exotic half of the mapping too.
+    ('transparency media', ['MediaType=TransparencyPaper'], '', ['-m', '2'], 'text-1p.txt'),
+    ('labels media', ['MediaType=LabelsPaper'], '', ['-m', '265'], 'text-1p.txt'),
+    ('mid-weight media', ['MediaType=Mid-Weight96-110g'], '', ['-m', '282'], 'text-1p.txt'),
     ('three copies', ['copies=3'], 'copies=3', ['-n', '3'], 'text-1p.txt'),
     ('two pages', [], '', [], 'text-2p.txt'),
     # Page sizes other than Letter and A4: the raster's page size name decides DMPAPER, so

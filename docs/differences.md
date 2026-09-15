@@ -231,19 +231,37 @@ and do the sheets come back in the right order? Simplex printing is unaffected e
 the comparison harness deliberately keeps no duplex case: the reference reorders pages by
 construction, so comparing against it there would fail for a reason that is not ours.
 
-## 6. Media type codes are HP's own. UNKNOWN for anything but plain paper
+## 6. Media type codes are HP's own. The path to the item is checked; the printer's side is not
 
-We forward the raster header's `cupsMediaType`, which HP's PPD sets: Paper = 1, Transparency
-= 2, and heavier stocks 258, 262, 265, 273 and so on. For the default Paper it is 1, which
-is also the value the reference implementation uses, so the common case agrees. Whether the
-printer expects HP's codes or the Windows `DMMEDIA` values for the exotic media is
-unverified.
+The PPD declares sixteen `MediaType` choices, and each one writes its code into the page
+device as `cupsMediaType`: Paper 1, TransparencyPaper 2, Light60-74g 258, BondPaper 260,
+Heavy111-130g 262, RoughPaper 263, LabelsPaper 265, EnvelopePaper 267, VellumPaper 273,
+Mid-Weight96-110g 282, ExtraHeavy131-175g 283, ColorPaper 512, LetterheadPaper 513,
+PreprintedPaper 514, PrepunchedPaper 515, RecycledPaper 516. cgpdftoraster copies that code
+into the raster header (offset 380 of `cups_page_header2_t`), and we forward the *header's*
+value as `ZJI_DMMEDIATYPE` rather than re-deriving it from the option name, because the header
+is where the interface says a raster filter should look.
 
-This is the one item the comparison harness cannot cover, and the reason is now precise:
-`cupsMediaType` reaches our filter in the raster header, set by the PPD's `MediaType`
-option through the PostScript page device, and `cupsfilter` cannot produce that (its raster
-always carries Paper/1) while the reference takes the code as a flag. The mapping itself is
-covered by a unit test in `crates/p1102-job`; what is unverified is the printer's side.
+An earlier version of this entry called media type the one thing the comparison harness could
+not cover, on the grounds that "cupsfilter cannot produce that (its raster always carries
+Paper/1)". That is wrong, and measuring it is what showed the entry up: `cupsfilter -o
+MediaType=TransparencyPaper` puts 2 in the header, and a job built from that raster carries
+`ZJI_DMMEDIATYPE` 2. What cupsfilter ignores is a name the PPD does not declare -
+`-o MediaType=HeavyPaper` stays Paper, because the choice is called `Heavy111-130g` - which is
+why everything below uses the file's own names.
+
+So the path is now measured rather than asserted, in two places:
+
+| what is checked | where |
+|---|---|
+| the PPD's code reaches the raster header | `scripts/reference-compare.py` asks cupsfilter for `TransparencyPaper`, and the case passes only if our job carries the code the header holds |
+| the header's code reaches the printer's item | the same comparison, against the reference driver's `-m`: 2 (transparency), 265 (labels) and 282 (mid-weight, a code the reference's help text does not list but its table accepts) |
+| every declared choice is forwarded | `scripts/rehearse-job.py` sweeps all sixteen choices of the installed PPD, patching each code into a small page cut out of a real raster and checking `ZJI_DMMEDIATYPE` in the job the real filter binary produces |
+
+What remains unverified is the printer's side: whether it acts on 282, 283, 260 or 512-516 the
+way this PPD implies, or wants the Windows `DMMEDIA` values instead. Nothing on this machine
+can answer that. A non-plain-paper job on the attached printer is the test, and the last table
+in this document says what a failure would look like.
 
 ## 7. Job timestamps. Cosmetic, on a different clock basis
 
