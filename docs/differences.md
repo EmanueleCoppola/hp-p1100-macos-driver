@@ -321,6 +321,13 @@ PPD's `600x400dpi` and `600x600dpi` both set `HWResolution[600 600]`, and the ra
 `RASTER_X` keeps the true 4900, which is the distinction the reference implementation
 documents as the horizontal pixel alignment.
 
+Orientation needs nothing from the filter either, and that is measured rather than assumed:
+`cupsfilter -o landscape` produces the same 4900x6400 Letter header as the portrait job, with
+the *content* rotated inside it - the ink that occupies rows 7..86 of columns 2..472 in
+portrait occupies rows 5927..6397 of columns 6..85 in landscape, 8,631 ink pixels against
+8,629. The geometry and the option stream are the same either way, so a landscape job is the
+same job to this filter: CUPS's page-setup filter has already done the rotation.
+
 ## 9. Deliberately unchanged
 
 - **The PPD's device description is byte-identical to HP's.** Media sizes, imageable areas,
