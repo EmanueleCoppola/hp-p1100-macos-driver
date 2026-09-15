@@ -441,6 +441,14 @@ so a legitimate implementation would read them out of the user's installed drive
 two-bit framing would stop the queue printing, where a wrong tone curve only looks wrong. That is
 why the threshold stays until there is a device to try it on.
 
+Two of the three pieces are verifiable here, which is worth knowing before anyone starts. The
+conversion is checkable against the tables themselves (the decoder above reproduces them, and
+the structure is asserted by `scripts/hp-tone-table.py`), and the compression is checkable
+against the reference encoder, which emits a multi-bitplane BIE when it is given a PGM rather
+than a PBM - so a two-plane encoder can be compared byte for byte the way the one-plane encoder
+is in `scripts/jbig-sweep.py`. Only the third piece, the ZJS framing for two planes, needs the
+printer's own answer.
+
 Two notes that belong with this entry. The depth question is the same one seen from the input
 side: our filter accepts 1 bit per pixel (copied through) and 8 (thresholded) and refuses
 anything else with a one-line error naming the depth, before writing a byte of the job - a
