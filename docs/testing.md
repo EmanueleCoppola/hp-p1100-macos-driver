@@ -294,7 +294,7 @@ $PY scripts/preflight-usb.py --all        # every USB device, not just printers 
 $PY scripts/preflight-usb.py --selftest   # check the report without a printer
 ```
 
-It answers the four questions that decide what to do next:
+It answers the questions that decide what to do next:
 
 - is a USB Printer-class device attached at all (interface class 7, or a Hewlett-Packard
   `03f0:` vendor id);
@@ -305,6 +305,11 @@ It answers the four questions that decide what to do next:
   interface is what the backchannel needs; fewer is called out;
 - which filters the queue names, whether they exist, and whether their architectures can
   run here - which is the question the whole project exists to answer.
+
+- whether CUPS's own side can see it: does the `usb` backend list the device the queue's URI
+  names? That is the closest thing to an answer to "will a job reach the printer at all", and
+  the report gives it in one line per queue, taken from the same executable a job is handed to
+  in its listing mode - which needs no privileges either.
 
 Interfaces are matched back to their device by `locationID`. Endpoints are reported as a
 count only: IOKit does not publish endpoint addresses as registry entries, so the script
@@ -358,7 +363,25 @@ compiling and delivered without installing:
 PY=/opt/homebrew/bin/python3.13
 $PY scripts/make-test-job.py --pattern square --page a4 -o /tmp/square.zjs --verify
 
+# straight through Apple's own backend: no queue, no privileges
 DEV=$(lpstat -v HP_LaserJet_Professional_P1102 | sed -n 's/^device for [^:]*: //p')
+DEVICE_URI="$DEV" /usr/libexec/cups/backend/usb 1 "$USER" bring-up 1 '' /tmp/square.zjs
+```
+
+The backend line is the same transport a queue would use. A CUPS backend takes its device
+URI from `argv[0]` - or, as here, from `DEVICE_URI` - and reads the job from the file argument
+or stdin, all documented in backend(7), and Apple's `usb` backend is world-executable, so
+**sending a job needs no administrator** and creates no queue to clean up. With no printer
+attached it says so plainly (`STATE: +offline-report`, `INFO: The printer is offline.`) and
+keeps retrying, which is itself the check that the invocation is right before anything is
+plugged in. The same binary with no arguments lists the USB devices CUPS can see, which is worth
+comparing with what `scripts/preflight-usb.py` says from the registry side.
+
+What that path does not cover is the wiring: it hands bytes to the backend, so it tests the job
+and the transport but not CUPS's chain from the PPD through the filter. That is what the raw
+queue below is for, and it does need administrator access:
+
+```bash
 sudo lpadmin -p P1102_raw -E -v "$DEV" -m raw
 lp -d P1102_raw -o raw /tmp/square.zjs
 lpstat -o P1102_raw

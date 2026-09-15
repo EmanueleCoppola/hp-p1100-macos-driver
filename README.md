@@ -258,7 +258,8 @@ Not verified:
    cannot be observed. This is the one that matters: every remaining question is about what
    the printer accepts.
 2. **Administrator access, to install.** Writing to /Library/Printers and creating a queue
-   needs sudo. The build itself no longer needs anything beyond scripts/build-native.sh.
+   needs sudo - though the first hardware test does not, since Apple's `usb` backend can be
+   run directly. The build itself needs nothing beyond scripts/build-native.sh.
 3. Optional, and only a convenience: sudo xcodebuild-license accept restores the `/usr/bin`
    shims and `brew`. Nothing here depends on it any more - the toolchain's own binaries are
    called directly - but it is the supported route, and the build says which one it used.
@@ -269,10 +270,13 @@ Not verified:
    interface class and endpoint count, checks the serial against the one the queue asks
    for, and - by diffing two `--json` runs across a power cycle - whether the device
    re-enumerates with a different identity.
-2. Send a minimal page, with no build and no install: `scripts/make-test-job.py` writes a
-   complete job whose payload the reference encoder produced, and a raw queue sends it
-   through Apple's own USB backend. If nothing prints, `P1102_NO_PJL=1` resends the same
-   payload without the PJL wrapper, which separates a wrapper problem from an image one.
+2. Send a minimal page. `scripts/make-test-job.py` writes a complete job whose payload the
+   reference encoder produced, and Apple's own `usb` backend takes it from there - no build,
+   no install and **no administrator**, because a backend is an ordinary executable that
+   reads its device URI from the environment. If the page does not print, the next question
+   is the wrapper: `P1102_NO_PJL=1`, or `make-test-job.py --no-pjl`, sends the same payload
+   without it. A raw queue, with `sudo`, then tests those same bytes through CUPS's own chain
+   rather than around it. Both recipes are in docs/testing.md.
 3. If the compressed image is rejected, `P1102_RAW=1` switches the filter to the
    uncompressed ZJT_RAW_IMAGE form, whose layout is the one thing here with no independent
    confirmation.
