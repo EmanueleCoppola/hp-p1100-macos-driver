@@ -103,7 +103,7 @@ middle stage is ours.
                              file matches a fresh build).
     docs/                    findings, written as they are confirmed.
     fixtures/inputs/         tiny deterministic source documents.
-    LICENSE, LICENSE-MIT, LICENSE-APACHE   dual MIT / Apache-2.0
+    LICENSE                      MIT licence
 
 Dependencies point one way only, so every layer below the filter can be exercised without
 CUPS and without a printer.
@@ -424,8 +424,7 @@ been modified. All inspection is read-only, and cupsfilter writes job data to /t
 The installer adds a new queue and a new directory and never writes over an Apple or HP
 file; see docs/installation.md.
 
-MIT OR Apache-2.0, at your option: see LICENSE, LICENSE-MIT and LICENSE-APACHE. Both texts
-are the canonical SPDX versions.
+This project is licensed under the MIT licence; see LICENSE.
 
 A permissive licence was chosen deliberately and the reasoning is in docs/research.md. In
 short: the implementation is our own, written from the documented formats, the published
@@ -434,5 +433,4 @@ the protocols and are used only as test oracles, never linked, copied or shipped
 thing necessarily shared is the normative T.82 arithmetic coder table, which every conforming
 JBIG implementation must contain.
 
-Say the word if you would rather it were GPL-2.0, or if you want a specific copyright holder
-named instead of "the p1100-drivers authors"; both are one-line changes.
+The copyright holder is Emanuele Coppola, as stated in LICENSE.
