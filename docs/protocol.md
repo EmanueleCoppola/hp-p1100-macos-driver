@@ -242,11 +242,25 @@ rule above, which an earlier version of this document described as 4-byte alignm
 
 ## Uncompressed mode
 
-**UNKNOWN, and worth testing on hardware.** `ZJT_RAW_IMAGE` (opcode 8) is documented as
-"full uncompressed plane follows". HP's macOS driver contains a `RawBandWriter` beside
-its `JbigBandWriter`, so a raw output path exists. The reference open implementation does
-not emit raw images, so we have no independently confirmed layout for it. If the P1102
-accepts it, it removes the JBIG dependency for v1 - but that is a hardware question.
+**Partly confirmed, and worth testing on hardware.** `ZJT_RAW_IMAGE` (opcode 8) is documented
+as "full uncompressed plane follows", and HP's filter has the path: `zjs::RawBandWriter` sits
+beside `zjs::JbigBandWriter` and implements the same interface. **CONFIRMED** from its
+disassembly:
+
+- `RawBandWriter::start` opens a chunk with opcode **8** and no items, and does not write a
+  BIH - so a raw image is a single chunk rather than a BIH plus data chunks.
+- `RawBandWriter::writeScans(const void*, n, m)` passes `n * m` bytes straight from the
+  caller's buffer to the stream. There is no per-scanline header, no bit reordering and no
+  compression: the payload is the packed scanlines as the caller holds them.
+- `RawBandWriter::end` closes the chunk and nothing else.
+
+That is exactly the shape we emit: one opcode-8 chunk holding the same 1 bpp bitmap the JBIG
+path would compress, at the same 128-pixel-aligned stride. What is still **UNKNOWN** is
+whether the device accepts it - the reference driver does not emit raw images, so nothing
+runnable confirms it end to end - and whether HP adds an item we do not, since the call
+that opens the chunk passes only the opcode. If the P1102 accepts raw, it removes the JBIG
+dependency for a first version; that is a hardware question, and `make-test-job.py --raw` and
+`P1102_RAW=1` both exist to answer it.
 
 ## Byte order caveat
 
