@@ -15,9 +15,11 @@
 #   scripts/jbig-oracle.sh verify <ours.jbg> <expected.pbm>
 #   scripts/jbig-oracle.sh which                      print the resolved oracle directory
 #
-# 'encode' uses the parameters we target: a single resolution layer (-d 0), options = 0
-# (no typical prediction, no differential layers, no LRLTWO), MX = 0 (no adaptive template
-# movement), L0 = 128. Our encoder must reproduce its output byte for byte.
+# 'encode' uses the parameters we target: a single resolution layer (-d 0), options = 0x5c
+# (DPON | TPBON | TPDON | LRLTWO - the byte HP's driver stores and the reference driver
+# sends), MX = 0 (no adaptive template movement), L0 = 128, order = 3. Our encoder must
+# reproduce its output byte for byte. Extra arguments are appended, so passing -p 0 after
+# the output file encodes the no-options configuration our own tests also cover.
 #
 # -d 0 matters: pbmtojbg otherwise silently enables differential layers for images larger
 # than its default 640x480 lowest layer, which produces a different BIH and a stream our
@@ -79,7 +81,7 @@ encode() {
     need
     [ $# -ge 2 ] || { echo "usage: $0 encode <in.pbm> <out.jbg> [extra args...]" >&2; exit 2; }
     in=$1; out=$2; shift 2
-    with_libs "$(oracle_bin pbmtojbg)" -d 0 -p 0 -m 0 -s 128 "$@" "$in" "$out"
+    with_libs "$(oracle_bin pbmtojbg)" -d 0 -p 92 -m 0 -s 128 -o 3 "$@" "$in" "$out"
 }
 
 decode() {

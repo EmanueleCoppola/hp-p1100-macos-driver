@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """JBIG (ISO/IEC 11544 / ITU-T T.82) encoder, written from the standard.
 
-Configuration emitted, chosen to be the simplest conforming one:
+Configuration emitted, the one both working drivers use for this printer family:
 
     DL = 0, D = 0 (single resolution layer), planes = 1
     order   = 3       (ILEAVE | SMID; irrelevant with one plane and one layer)
-    options = 0       (no differential layers, no typical prediction, no LRLTWO)
+    options = 0x5c    (DPON | TPBON | TPDON | LRLTWO)
     L0      = 128     lines per stripe
     MX = MY = 0       no adaptive template movement
 
-That drops the two most intricate parts of the algorithm (typical prediction and the
-adaptive template) while remaining something every conforming decoder must handle.
+Only TPBON changes the coded data here: TPDON and LRLTWO belong to the low-resolution
+image of differential layers, which we do not emit, and DPON is a decoder-side switch.
+LRLTWO still selects which of the two typical-prediction contexts is used.
 
 The arithmetic coder is the standard's QM coder and the probability table is the
 normative one published in T.82 - it is a table of constants every implementation has to
@@ -19,16 +20,28 @@ contain, not copied implementation code.
 This is the prototype the Rust implementation in crates/p1102-jbig has to match, and it
 is checked byte for byte against the reference encoder:
 
-    scripts/jbig-oracle.sh encode x.pbm ref.jbg
+    scripts/jbig-oracle.sh encode x.pbm ref.jbg        # -p 92 is the script's default
     scripts/jbig-encode.py x.pbm ours.jbg
     cmp ref.jbg ours.jbg
 
 Usage:
-  scripts/jbig-encode.py <in.pbm> <out.jbg> [--l0 N] [--quiet]
+  scripts/jbig-encode.py <in.pbm> <out.jbg> [--l0 N] [--options N] [--quiet]
 """
 
 import argparse
 import sys
+
+# BIH option bits. DPON, TPBON, TPDON and LRLTWO together are what HP's driver stores in
+# its encoder constructor and what the reference implementation sends for this family.
+OPT_DPON = 0x04
+OPT_TPBON = 0x08
+OPT_TPDON = 0x10
+OPT_LRLTWO = 0x40
+DEFAULT_OPTIONS = OPT_DPON | OPT_TPBON | OPT_TPDON | OPT_LRLTWO
+
+# The two contexts T.82 reserves for the typical-prediction bit, selected by LRLTWO.
+TP_CX_LRLTWO = 0x195
+TP_CX_DEFAULT = 0x0E5
 
 # --------------------------------------------------------------------------- tables
 
@@ -206,7 +219,7 @@ class QmEncoder(object):
 # --------------------------------------------------------------------------- JBIG
 
 class JbigEncoder(object):
-    def __init__(self, width, height, l0=128, order=3, options=0):
+    def __init__(self, width, height, l0=128, order=3, options=DEFAULT_OPTIONS):
         self.xd = width
         self.yd = height
         self.l0 = l0
@@ -249,11 +262,38 @@ class JbigEncoder(object):
         enc = QmEncoder(self.st, reuse_state=not reset)
         lines = min(hl, yd - y0)
 
+        # Typical prediction: one bit per line saying whether the line is still typical
+        # (identical to the line above, or blank for the very first line), and a typical
+        # line is then not coded at all. LRLTWO picks which of the two reserved contexts
+        # the bit is coded with.
+        tp = bool(self.options & OPT_TPBON)
+        lrltwo = bool(self.options & OPT_LRLTWO)
+        tp_cx = TP_CX_LRLTWO if lrltwo else TP_CX_DEFAULT
+        if reset:
+            ltp_old = False
+        else:
+            prev = (y0 - 1) * hbpl
+            if y0 > 1:
+                above = (y0 - 2) * hbpl
+                ltp_old = bitmap[prev:prev + hbpl] == bitmap[above:above + hbpl]
+            else:
+                ltp_old = not any(bitmap[prev:prev + hbpl])
+
         for i in range(lines):
             y = y0 + i
             base = y * hbpl
             up = base - hbpl
             up2 = base - hbpl - hbpl
+
+            if tp:
+                if i > 0 or not reset:
+                    typical = bitmap[base:base + hbpl] == bitmap[up:base]
+                else:
+                    typical = not any(bitmap[base:base + hbpl])
+                enc.encode(tp_cx, int(typical == ltp_old))
+                ltp_old = typical
+                if typical:
+                    continue
 
             line_h1 = 0
             line_h2 = 0
@@ -276,13 +316,23 @@ class JbigEncoder(object):
                     line_h1 <<= 1
                     line_h2 <<= 1
                     line_h3 <<= 1
-                    # Three-line template, no adaptive-template pixel:
-                    #   row y-2: columns x+1..x+3      -> line_h3 bits 11..13
-                    #   row y-1: columns x-4..x        -> line_h2 bits 14..18
-                    #   row y  : columns x-2..x-1      -> line_h1 bits  9..10
-                    cx = (((line_h3 >> 8) & 0x380)
-                          | ((line_h2 >> 12) & 0x07C)
-                          | ((line_h1 >> 9) & 0x003))
+                    # The layer being coded is the lowest resolution layer - with no
+                    # differential layers it is also the only one - and LRLTWO picks its
+                    # template. Neither has an adaptive-template pixel here.
+                    if lrltwo:
+                        # Two-line template:
+                        #   row y-1: columns x-4..x+1 -> line_h2 bits 14..19
+                        #   row y  : columns x-4..x-1 -> line_h1 bits  9..12
+                        cx = (((line_h2 >> 10) & 0x3F0)
+                              | ((line_h1 >> 9) & 0x00F))
+                    else:
+                        # Three-line template:
+                        #   row y-2: columns x+1..x+3 -> line_h3 bits 11..13
+                        #   row y-1: columns x-4..x   -> line_h2 bits 14..18
+                        #   row y  : columns x-2..x-1 -> line_h1 bits  9..10
+                        cx = (((line_h3 >> 8) & 0x380)
+                              | ((line_h2 >> 12) & 0x07C)
+                              | ((line_h1 >> 9) & 0x003))
                     enc.encode(cx, (line_h1 >> 8) & 1)
                     j += 1
                     if not (j & 7 and j < xd):
@@ -333,20 +383,21 @@ def main(argv):
     ap.add_argument('input')
     ap.add_argument('output')
     ap.add_argument('--l0', type=int, default=128)
+    ap.add_argument('--options', type=lambda s: int(s, 0), default=DEFAULT_OPTIONS,
+                    help='BIH options byte (default 0x5c, the reference configuration)')
     ap.add_argument('--quiet', action='store_true')
     args = ap.parse_args(argv)
 
     w, h, data = read_pbm(args.input)
-    enc = JbigEncoder(w, h, l0=args.l0)
+    enc = JbigEncoder(w, h, l0=args.l0, options=args.options)
     bie = enc.encode(data)
     with open(args.output, 'wb') as f:
         f.write(bie)
     if not args.quiet:
-        print('%s: %dx%d -> %d bytes (%d stripes, L0=%d)'
-              % (args.output, w, h, len(bie), enc.stripes, args.l0))
+        print('%s: %dx%d -> %d bytes (%d stripes, L0=%d, options=0x%02x)'
+              % (args.output, w, h, len(bie), enc.stripes, args.l0, args.options))
     return 0
 
 
 if __name__ == '__main__':
     sys.exit(main(sys.argv[1:]))
-

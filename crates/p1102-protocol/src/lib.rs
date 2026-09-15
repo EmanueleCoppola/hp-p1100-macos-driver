@@ -129,6 +129,11 @@ pub const JBIG_BIH_LEN: usize = 20;
 /// Cap used by the reference encoder for each JBIG data chunk.
 pub const JBIG_BID_MAX: usize = 65536;
 
+/// Zero bytes the reference implementation adds to the end of the final image-data chunk,
+/// beyond rounding the chunk up to 4 bytes. It is the default of its `-X` option, and its
+/// own help text describes the padding as working around what the printer expects.
+pub const JBIG_BID_EXTRA_PAD: usize = 16;
+
 /// How to fill a chunk header's `reserved` field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reserved {
@@ -388,15 +393,17 @@ impl Encoder {
 
     /// The whole compressed image: `JBIG_BIH` then one or more `JBIG_BID` chunks.
     ///
-    /// The last data chunk is zero-padded so the chunk ends on a 4-byte boundary;
-    /// earlier chunks are not padded.
+    /// The last data chunk carries the reference implementation's padding: 16 zero bytes on
+    /// top of rounding up to a 4-byte boundary. Earlier chunks are not padded. The padding
+    /// is inert - a decoder stops once it has the announced number of lines - but matching
+    /// it keeps a captured job comparable byte for byte.
     pub fn jbig_image(&mut self, bih: &[u8], data_chunks: &[&[u8]]) {
         debug_assert_eq!(bih.len(), JBIG_BIH_LEN);
         self.chunk(op::JBIG_BIH, &Items::new(), bih, Reserved::Zero);
         let last = data_chunks.len().saturating_sub(1);
         for (i, data) in data_chunks.iter().enumerate() {
             let pad = if i == last {
-                (4 - data.len() % 4) % 4
+                JBIG_BID_EXTRA_PAD + (4 - data.len() % 4) % 4
             } else {
                 0
             };
@@ -904,8 +911,8 @@ mod tests {
     #[test]
     fn jbig_image_pads_only_the_last_chunk() {
         let bih = [0u8; JBIG_BIH_LEN];
-        let a = [1u8, 2, 3]; // 3 bytes -> padded to 4 if last
-        let b = [9u8; 7]; // 7 bytes -> padded to 8
+        let a = [1u8, 2, 3]; // not last: never padded
+        let b = [9u8; 7]; // last: 7 + extra 16 + 1 to reach 4 bytes
         let mut enc = Encoder::new();
         enc.jbig_image(&bih, &[&a, &b]);
         let chunks = decode_of(&mut enc);
@@ -924,10 +931,10 @@ mod tests {
         );
         assert_eq!(
             chunks[2].payload.len(),
-            8,
-            "final chunk must be padded to 4 bytes"
+            7 + JBIG_BID_EXTRA_PAD + 1,
+            "the final chunk carries the reference encoder's extra padding"
         );
-        assert_eq!(&chunks[2].payload[7..], &[0u8]);
+        assert_eq!(&chunks[2].payload[7..], &[0u8; JBIG_BID_EXTRA_PAD + 1]);
     }
 
     #[test]

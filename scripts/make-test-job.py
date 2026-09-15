@@ -65,6 +65,9 @@ CHUNK_SIGNATURE = 0x5A5A
 STREAM_SIGNATURE = b'JZJZ'
 JBIG_BIH_LEN = 20
 JBIG_BID_MAX = 65536
+# What the reference encoder adds to the end of the final image chunk, beyond aligning it
+# to 4 bytes; its default for the -X option.
+JBIG_BID_EXTRA_PAD = 16
 UEL = b'\x1b%-12345X'
 
 
@@ -265,7 +268,10 @@ def build_job(bie, width, height, dpi, paper, opts):
             chunks = [b'']
         for i, c in enumerate(chunks):
             if i == len(chunks) - 1:
-                pad = (4 - len(c) % 4) % 4
+                # The reference encoder's default for its -X option: 16 zero bytes on top
+                # of rounding the chunk up to 4 bytes. Inert, but it keeps this job
+                # comparable byte for byte with one the reference produces.
+                pad = JBIG_BID_EXTRA_PAD + (4 - len(c) % 4) % 4
                 c = c + b'\x00' * pad
             enc.chunk(OP_JBIG_BID, (), c)
 
@@ -328,7 +334,7 @@ def verify(job, bie, opts):
             raise SystemExit('chunk size does not add up for type %d' % c['type'])
     if jbig:
         reassembled = b''.join(c['payload'] for c in chunks if c['type'] in (OP_JBIG_BIH, OP_JBIG_BID))
-        # the last BID chunk carries 4-byte padding that is not part of the BIE
+        # the last BID chunk carries padding that is not part of the BIE
         trimmed = reassembled[:len(bie)]
         if trimmed != bie:
             raise SystemExit('reassembled BIE differs from the encoder output')

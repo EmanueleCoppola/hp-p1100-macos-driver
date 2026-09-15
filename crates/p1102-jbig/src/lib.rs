@@ -1,33 +1,51 @@
 //! JBIG (ISO/IEC 11544 / ITU-T T.82) encoder.
 //!
-//! Written from the standard. Configuration emitted, which is the simplest conforming one:
+//! Written from the standard. Configuration emitted:
 //!
 //! ```text
 //! DL = 0, D = 0 (a single resolution layer), planes = 1
 //! order   = 3    (ILEAVE | SMID; irrelevant with one plane and one layer)
-//! options = 0    (no differential layers, no typical prediction, no LRLTWO)
+//! options = 0x5c (DPON | TPBON | TPDON | LRLTWO)
 //! L0      = 128  lines per stripe
 //! MX = MY = 0    no adaptive template movement
 //! ```
 //!
-//! That drops the two most intricate parts of the algorithm - typical prediction and the
-//! adaptive template pixel - while staying well inside what any conforming decoder must
-//! accept. The output is byte-identical to the reference implementation for this
-//! configuration; see the golden tests below and `docs/jbig.md`.
+//! This is the configuration both working drivers use for this printer family, and it is
+//! not an arbitrary choice: HP's own filter stores `0x5c` in the encoder constructor, and
+//! the reference implementation reaches the same byte. The product is byte-identical to
+//! the reference implementation for this configuration, which the oracle sweep and the
+//! golden tests below check; see `docs/jbig.md`.
+//!
+//! Of the four bits, only TPBON changes the coded data here. TPDON and LRLTWO apply to the
+//! low-resolution image of differential layers, which we do not emit, and DPON is a
+//! decoder-side switch. LRLTWO is not quite inert even so: it selects which of the two
+//! contexts T.82 reserves for the typical-prediction bit is used.
 //!
 //! The probability table is the normative one from T.82: a table of constants that every
 //! implementation has to contain, not copied implementation code.
 //!
-//! Scope is deliberately narrow: one bit plane, one resolution layer, no typical
-//! prediction, no adaptive template, no differential layers. The P1102 path needs nothing
-//! more.
+//! Scope is deliberately narrow: one bit plane, one resolution layer, no adaptive template
+//! movement, no differential layers. The P1102 path needs nothing more.
 
 /// Lines per stripe. The value the reference implementation uses for this printer family.
 pub const DEFAULT_L0: u32 = 128;
 /// `ILEAVE | SMID`, matching the reference implementation's default order byte.
 pub const DEFAULT_ORDER: u8 = 3;
-/// No differential layers, no typical prediction, no LRLTWO.
-pub const DEFAULT_OPTIONS: u8 = 0;
+
+/// BIH `options` bits.
+pub const OPT_DPON: u8 = 0x04;
+pub const OPT_TPBON: u8 = 0x08;
+pub const OPT_TPDON: u8 = 0x10;
+pub const OPT_LRLTWO: u8 = 0x40;
+
+/// `DPON | TPBON | TPDON | LRLTWO`, the value HP's driver and the reference implementation
+/// both put in the BIH for this printer family.
+pub const DEFAULT_OPTIONS: u8 = OPT_DPON | OPT_TPBON | OPT_TPDON | OPT_LRLTWO;
+
+/// The two arithmetic-coder contexts T.82 reserves for the typical-prediction bit, chosen
+/// by LRLTWO.
+const TP_CX_LRLTWO: usize = 0x195;
+const TP_CX_DEFAULT: usize = 0x0E5;
 
 const MARKER_STUFF: u8 = 0x00;
 const MARKER_ESC: u8 = 0xFF;
@@ -345,6 +363,22 @@ impl JbigEncoder {
         let reset = stripe == 0;
         let lines = hl.min(yd - y0);
 
+        // T.82 typical prediction (TPBON). One bit per line, coded with a context the
+        // standard reserves for it, and a "typical" line is then not coded at all: it is
+        // reproduced by the decoder from the line above. The bit sent is not the line's
+        // typicality but whether it *changed*, so long runs of identical lines cost one
+        // bit each.
+        let tp = self.options & OPT_TPBON != 0;
+        let lrltwo = self.options & OPT_LRLTWO != 0;
+        let tp_cx = if lrltwo { TP_CX_LRLTWO } else { TP_CX_DEFAULT };
+
+        // Read before the coder takes the state table mutably.
+        let mut ltp_old = if reset {
+            false
+        } else {
+            self.typical_state_at_stripe_start(bitmap, y0)
+        };
+
         let body = {
             let mut enc = QmEncoder::new(&mut self.st, !reset);
             for i in 0..lines {
@@ -353,6 +387,22 @@ impl JbigEncoder {
                 // The neighbour rows only exist when the guards below hold, so the
                 // subtractions are done inside those branches rather than up front.
                 let fresh = !reset;
+
+                if tp {
+                    // Line 0 of the first stripe is compared with a blank line; every
+                    // other line is compared with the line above it, including across a
+                    // stripe boundary.
+                    let typical = if i > 0 || fresh {
+                        bitmap[base..base + hbpl] == bitmap[base - hbpl..base]
+                    } else {
+                        bitmap[base..base + hbpl].iter().all(|&b| b == 0)
+                    };
+                    enc.encode(tp_cx, u32::from(typical == ltp_old));
+                    ltp_old = typical;
+                    if typical {
+                        continue;
+                    }
+                }
 
                 let mut line_h1: u32 = 0;
                 let mut line_h2: u32 = 0;
@@ -379,13 +429,23 @@ impl JbigEncoder {
                         line_h1 <<= 1;
                         line_h2 <<= 1;
                         line_h3 <<= 1;
-                        // Three-line template with no adaptive-template pixel:
-                        //   row y-2: columns x+1..x+3   -> line_h3 bits 11..13
-                        //   row y-1: columns x-4..x     -> line_h2 bits 14..18
-                        //   row y  : columns x-2..x-1   -> line_h1 bits  9..10
-                        let cx = (((line_h3 >> 8) & 0x380)
-                            | ((line_h2 >> 12) & 0x07C)
-                            | ((line_h1 >> 9) & 0x003)) as usize;
+                        // The layer being coded is the lowest resolution layer - with no
+                        // differential layers it is also the only one - and LRLTWO picks
+                        // its template. Neither has an adaptive-template pixel here.
+                        let cx = if lrltwo {
+                            // Two-line template:
+                            //   row y-1: columns x-4..x+1 -> line_h2 bits 14..19
+                            //   row y  : columns x-3..x-1 -> line_h1 bits  9..12
+                            (((line_h2 >> 10) & 0x3F0) | ((line_h1 >> 9) & 0x00F)) as usize
+                        } else {
+                            // Three-line template:
+                            //   row y-2: columns x+1..x+3 -> line_h3 bits 11..13
+                            //   row y-1: columns x-4..x   -> line_h2 bits 14..18
+                            //   row y  : columns x-2..x-1 -> line_h1 bits  9..10
+                            (((line_h3 >> 8) & 0x380)
+                                | ((line_h2 >> 12) & 0x07C)
+                                | ((line_h1 >> 9) & 0x003)) as usize
+                        };
                         enc.encode(cx, (line_h1 >> 8) & 1);
                         j += 1;
                         if j & 7 == 0 || j >= xd {
@@ -417,6 +477,24 @@ impl JbigEncoder {
         });
         body
     }
+
+    /// The typicality state a stripe starts in: whether the previous stripe's last line was
+    /// itself typical. Carrying it across the boundary is what makes the first line of a
+    /// stripe cost a bit only when its typicality actually differs from that.
+    fn typical_state_at_stripe_start(&self, bitmap: &[u8], y0: usize) -> bool {
+        let hbpl = self.hbpl;
+        debug_assert!(
+            y0 > 0,
+            "stripe 0 starts with the state cleared, not from a line"
+        );
+        let prev = (y0 - 1) * hbpl;
+        if y0 > 1 {
+            let above = (y0 - 2) * hbpl;
+            bitmap[prev..prev + hbpl] == bitmap[above..above + hbpl]
+        } else {
+            bitmap[prev..prev + hbpl].iter().all(|&b| b == 0)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -435,6 +513,12 @@ mod tests {
         JbigEncoder::new(width, height).encode(bitmap).unwrap()
     }
 
+    fn encode_with(width: u32, height: u32, options: u8, bitmap: &[u8]) -> Vec<u8> {
+        JbigEncoder::with_options(width, height, DEFAULT_L0, DEFAULT_ORDER, options)
+            .encode(bitmap)
+            .unwrap()
+    }
+
     #[test]
     fn bih_layout_matches_the_standard() {
         let e = JbigEncoder::new(4992, 6400);
@@ -450,7 +534,7 @@ mod tests {
         assert_eq!(b[16], 0); // MX
         assert_eq!(b[17], 0); // MY
         assert_eq!(b[18], 3); // ILEAVE | SMID
-        assert_eq!(b[19], 0); // no options
+        assert_eq!(b[19], 0x5C); // DPON | TPBON | TPDON | LRLTWO
     }
 
     #[test]
@@ -461,19 +545,25 @@ mod tests {
         assert_eq!(JbigEncoder::new(8, 1).stripes(), 1);
     }
 
-    /// 8x2: row 0 = 10101010, row 1 blank. Byte-exact against the reference encoder.
+    /// 8x2: row 0 = 10101010, row 1 blank. Byte-exact against the reference encoder, both
+    /// for the configuration we ship and for options = 0: those two take different paths
+    /// through the template choice and the typical-prediction bit.
     #[test]
     fn golden_8x2() {
-        let want = hex("0000010000000008000000020000008000000300be80ff02");
+        let want = hex("000001000000000800000002000000800000035ce164ff02");
         assert_eq!(encode(8, 2, &[0xAA, 0x00]), want);
+        let no_options = hex("0000010000000008000000020000008000000300be80ff02");
+        assert_eq!(encode_with(8, 2, 0, &[0xAA, 0x00]), no_options);
     }
 
     /// 16x4 with a denser pattern.
     #[test]
     fn golden_16x4() {
-        let want = hex("0000010000000010000000040000008000000300fac68596842853ff02");
+        let want = hex("000001000000001000000004000000800000035cfaa872927a5193ff02");
         let bm = [0xF0, 0x0F, 0x0F, 0xF0, 0xFF, 0x00, 0x00, 0xFF];
         assert_eq!(encode(16, 4, &bm), want);
+        let no_options = hex("0000010000000010000000040000008000000300fac68596842853ff02");
+        assert_eq!(encode_with(16, 4, 0, &bm), no_options);
     }
 
     /// 800x600, bands of 17 rows alternating solid and blank: five stripes, so this covers
@@ -481,7 +571,9 @@ mod tests {
     #[test]
     fn golden_800x600_five_stripes() {
         let want = hex(
-            "0000010000000320000002580000008000000300e9a6349fc2875153ce3a400042540168f14c855372e86580ff027a7b898c6a0362c4c1185a4c94ff022fe60d7081240779e4059840ff0270d67e45fcf045fe1d45fbb2ff022b35ff003a2fab28ff02",
+            "000001000000032000000258000000800000035cfd34d1d9f4629a6729aa86261a03ff02\
+             509c758ea77bc922ff009760ff02e7130a84b1336b40065e80ff025e439f22e33e63f2f99fc0ff02\
+             121d3fe58c4f9cff02",
         );
         let stride = 100usize; // 800 / 8
         let mut bm = vec![0u8; stride * 600];
@@ -498,7 +590,10 @@ mod tests {
     /// 1x200 single column: a degenerate width, and 200 rows over two stripes.
     #[test]
     fn golden_1x200_single_column() {
-        let want = hex("0000010000000001000000c80000008000000300a5e4ff02ff02");
+        let want = hex(
+            "0000010000000001000000c8000000800000035cf303d2e768d6db6db6db6db6db6db6db70ff02\
+             6090db6db6db6db6dcff02",
+        );
         let bm: Vec<u8> = (0..200)
             .map(|y| if y % 3 == 0 { 0x80 } else { 0x00 })
             .collect();
