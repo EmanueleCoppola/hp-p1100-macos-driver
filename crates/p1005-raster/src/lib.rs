@@ -25,6 +25,8 @@
 //! that role and is stored out of band. Verified against the real header definition and
 //! against captured output; see `docs/protocol.md`.
 
+use std::io::Read;
+
 /// `CUPS_RASTER_SYNC`, `"RaS3"`.
 pub const SYNC_RASTER3: u32 = 0x5261_5333;
 /// `CUPS_RASTER_SYNCv2`, `"RaS2"` (also `CUPS_RASTER_SYNC_PWG`).
@@ -170,6 +172,8 @@ pub enum RasterError {
     },
     /// Depth we cannot convert to 1 bpp.
     UnsupportedDepth(u32),
+    /// The underlying reader failed.
+    Io(String),
     /// Degenerate geometry that cannot be trusted.
     BadGeometry {
         width: u32,
@@ -198,6 +202,7 @@ impl std::fmt::Display for RasterError {
             RasterError::UnsupportedDepth(bits) => {
                 write!(f, "unsupported raster depth: {bits} bits per pixel")
             }
+            RasterError::Io(e) => write!(f, "reading the raster stream: {e}"),
             RasterError::BadGeometry {
                 width,
                 height,
@@ -254,33 +259,7 @@ impl<'a> RasterReader<'a> {
         }
         let header = parse_header(&self.data[self.pos..hdr_end]);
 
-        if header.cups_width == 0 || header.cups_height == 0 || header.cups_bytes_per_line == 0 {
-            return Err(RasterError::BadGeometry {
-                width: header.cups_width,
-                height: header.cups_height,
-                bytes_per_line: header.cups_bytes_per_line,
-            });
-        }
-        let min_line =
-            (header.cups_width as usize * header.cups_bits_per_pixel as usize).div_ceil(8);
-        if (header.cups_bytes_per_line as usize) < min_line {
-            return Err(RasterError::BadGeometry {
-                width: header.cups_width,
-                height: header.cups_height,
-                bytes_per_line: header.cups_bytes_per_line,
-            });
-        }
-        if !matches!(header.cups_bits_per_pixel, 1 | 2 | 4 | 8) {
-            return Err(RasterError::UnsupportedDepth(header.cups_bits_per_pixel));
-        }
-
-        // `cups_compression` is deliberately NOT used to gate parsing. It is only ever
-        // populated from the PostScript page device dictionary (cups/raster-interpret.c)
-        // and libcups never consults it when reading pixels: page data is always
-        // `cupsBytesPerLine * cupsHeight` raw bytes. Real cgpdftoraster output here carries
-        // the value 401, which is not a CUPS compression code at all, so trusting it would
-        // reject valid jobs. This byte-count check is the real validation: a genuinely
-        // compressed stream would not match and we fail loudly on that instead.
+        validate_page_header(&header)?;
         let payload_len = header.payload_len();
         let payload_end = hdr_end + payload_len;
         if payload_end > self.data.len() {
@@ -294,6 +273,119 @@ impl<'a> RasterReader<'a> {
         self.pos = payload_end;
         self.page_index += 1;
         Ok(Some((header, pixels)))
+    }
+}
+
+/// The page-level checks both readers apply before handing a page on.
+///
+/// cupsCompression is deliberately not one of them. It is only ever populated from the
+/// PostScript page device dictionary (cups/raster-interpret.c) and libcups never consults it
+/// when reading pixels: page data is always cupsBytesPerLine * cupsHeight raw bytes. Real
+/// cgpdftoraster output carries 401 here, which is not a CUPS compression code at all, so
+/// trusting it would reject valid jobs. The byte count is the real check, and the pixel
+/// conversion fails loudly on a depth it cannot handle.
+fn validate_page_header(header: &PageHeader) -> Result<(), RasterError> {
+    if header.cups_width == 0 || header.cups_height == 0 || header.cups_bytes_per_line == 0 {
+        return Err(RasterError::BadGeometry {
+            width: header.cups_width,
+            height: header.cups_height,
+            bytes_per_line: header.cups_bytes_per_line,
+        });
+    }
+    let min_line = (header.cups_width as usize * header.cups_bits_per_pixel as usize).div_ceil(8);
+    if (header.cups_bytes_per_line as usize) < min_line {
+        return Err(RasterError::BadGeometry {
+            width: header.cups_width,
+            height: header.cups_height,
+            bytes_per_line: header.cups_bytes_per_line,
+        });
+    }
+    if !matches!(header.cups_bits_per_pixel, 1 | 2 | 4 | 8) {
+        return Err(RasterError::UnsupportedDepth(header.cups_bits_per_pixel));
+    }
+    Ok(())
+}
+
+/// Fill buf, returning how many bytes actually arrived. Fewer than buf.len() means the stream
+/// ended, which callers have to tell apart from an error.
+fn read_full<R: Read>(reader: &mut R, buf: &mut [u8]) -> Result<usize, RasterError> {
+    let mut filled = 0;
+    while filled < buf.len() {
+        match reader.read(&mut buf[filled..]) {
+            Ok(0) => break,
+            Ok(n) => filled += n,
+            Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(RasterError::Io(e.to_string())),
+        }
+    }
+    Ok(filled)
+}
+
+/// Streaming CUPS raster reader, for the filter.
+///
+/// A filter must not hold a whole job in memory: at 600 dpi one Letter page is 31 MB of
+/// raster, so a fifty page document would be over a gigabyte, while the compressed output for
+/// the same job is a few kilobytes. This reads one page at a time into a buffer the caller
+/// reuses, so peak memory is a page rather than a job.
+///
+/// RasterReader remains for callers that already hold the bytes, such as the inspection
+/// tooling. Both share the header parsing and the page validation above.
+pub struct RasterStream<R: Read> {
+    inner: R,
+    header: Vec<u8>,
+    page_index: usize,
+    started: bool,
+}
+
+impl<R: Read> RasterStream<R> {
+    pub fn new(inner: R) -> Self {
+        Self {
+            inner,
+            header: vec![0u8; PAGE_HEADER_LEN],
+            page_index: 0,
+            started: false,
+        }
+    }
+
+    /// Read the next page's header and pixels. payload is replaced with the pixel data.
+    /// Ok(None) means the stream ended cleanly between pages.
+    pub fn next_page(&mut self, payload: &mut Vec<u8>) -> Result<Option<PageHeader>, RasterError> {
+        if !self.started {
+            let mut sync = [0u8; 4];
+            if read_full(&mut self.inner, &mut sync)? < 4 {
+                return Err(RasterError::Truncated);
+            }
+            // The writer stored the sync word as a native u32 (cupsRasterOpenIO).
+            let sync = u32::from_ne_bytes(sync);
+            if sync != SYNC_RASTER3 {
+                return Err(RasterError::BadSync(sync));
+            }
+            self.started = true;
+        }
+
+        let got = read_full(&mut self.inner, &mut self.header)?;
+        if got == 0 {
+            return Ok(None);
+        }
+        if got < PAGE_HEADER_LEN {
+            return Err(RasterError::Truncated);
+        }
+
+        let header = parse_header(&self.header);
+        validate_page_header(&header)?;
+        let payload_len = header.payload_len();
+        payload.clear();
+        payload.resize(payload_len, 0);
+        let got = read_full(&mut self.inner, payload)?;
+        if got < payload_len {
+            return Err(RasterError::GeometryMismatch {
+                page_index: self.page_index,
+                expected: payload_len,
+                remaining: got,
+            });
+        }
+        self.page_index += 1;
+        Ok(Some(header))
     }
 }
 
@@ -663,6 +755,75 @@ mod tests {
         let (got, px) = r.next_page().unwrap().unwrap();
         assert_eq!(got, h);
         assert_eq!(px.len(), 16);
+    }
+    #[test]
+    fn the_streaming_reader_matches_the_slice_reader() {
+        let h = header(8, 2, 8, 8, "Letter");
+        let s = stream_pages(&[(&h, &[1u8; 16]), (&h, &[2u8; 16]), (&h, &[3u8; 16])]);
+
+        let mut from_slice = Vec::new();
+        let mut reader = RasterReader::new(&s);
+        while let Some((hdr, px)) = reader.next_page().unwrap() {
+            from_slice.push((hdr, px.to_vec()));
+        }
+
+        let mut from_stream = Vec::new();
+        let mut stream = RasterStream::new(&s[..]);
+        let mut buf = Vec::new();
+        while let Some(hdr) = stream.next_page(&mut buf).unwrap() {
+            from_stream.push((hdr, buf.clone()));
+        }
+
+        assert_eq!(from_slice.len(), 3);
+        assert_eq!(from_slice, from_stream);
+    }
+
+    #[test]
+    fn the_streaming_reader_ends_cleanly_between_pages() {
+        let h = header(8, 2, 8, 8, "Letter");
+        let s = stream_pages(&[(&h, &[0u8; 16])]);
+        let mut stream = RasterStream::new(&s[..]);
+        let mut buf = Vec::new();
+        assert!(stream.next_page(&mut buf).unwrap().is_some());
+        assert!(stream.next_page(&mut buf).unwrap().is_none());
+    }
+
+    #[test]
+    fn the_streaming_reader_reports_a_page_that_ends_early() {
+        let h = header(8, 2, 8, 8, "Letter");
+        let mut s = stream_pages(&[(&h, &[0u8; 16])]);
+        s.truncate(s.len() - 4);
+        let mut stream = RasterStream::new(&s[..]);
+        let mut buf = Vec::new();
+        match stream.next_page(&mut buf).unwrap_err() {
+            RasterError::GeometryMismatch {
+                expected,
+                remaining,
+                ..
+            } => {
+                assert_eq!(expected, 16);
+                assert_eq!(remaining, 12);
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_streaming_reader_rejects_an_empty_or_misidentified_stream() {
+        let empty: Vec<u8> = Vec::new();
+        let mut stream = RasterStream::new(&empty[..]);
+        let mut buf = Vec::new();
+        assert_eq!(
+            stream.next_page(&mut buf).unwrap_err(),
+            RasterError::Truncated
+        );
+
+        let junk = [0u8; 8];
+        let mut stream = RasterStream::new(&junk[..]);
+        assert_eq!(
+            stream.next_page(&mut buf).unwrap_err(),
+            RasterError::BadSync(0)
+        );
     }
 
     fn letter_mono_header(width: u32, height: u32) -> PageHeader {

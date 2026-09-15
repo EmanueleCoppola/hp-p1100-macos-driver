@@ -1,8 +1,7 @@
 //! CUPS filter: `application/vnd.cups-raster` in, ZjStream out.
 //!
-//! This replaces HP's `rastertozjs` for the HP LaserJet Professional P1102. It is a
-//! native ARM64 binary with no `libcups` dependency, so it is not affected by the
-//! removed CUPS libraries that stop HP's filter from running at all.
+//! This replaces HP's `rastertozjs` for the HP LaserJet Professional P1102. It is a native
+//! ARM64 binary, where HP's is x86_64-only and cannot launch on this Mac at all.
 //!
 //! CUPS invokes filters as:
 //!
@@ -15,11 +14,11 @@
 
 use std::env;
 use std::fs;
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use p1005_job::{encode_raster_job, format_timestamp, ImageEncoding, Options};
+use p1005_job::{encode_raster_stream, format_timestamp, ImageEncoding, Options};
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().collect();
@@ -27,25 +26,31 @@ fn main() -> ExitCode {
     let options = args.get(5).cloned().unwrap_or_default();
     let input_file = args.get(6).filter(|p| !p.is_empty()).cloned();
 
-    let raster = match read_input(input_file.as_deref()) {
-        Ok(v) => v,
-        Err(e) => return fail(&format!("reading raster input: {e}")),
+    let opts = build_options(&options);
+    let stdout = io::stdout();
+    let mut out = Counting {
+        inner: io::BufWriter::new(stdout.lock()),
+        bytes: 0,
     };
 
-    let opts = build_options(&options);
-    match encode_raster_job(&raster, &opts) {
-        Ok(bytes) => {
-            let stdout = io::stdout();
-            let mut out = stdout.lock();
-            if let Err(e) = out.write_all(&bytes).and_then(|()| out.flush()) {
-                return fail(&format!("writing job to stdout: {e}"));
+    // Streamed: the raster is read a page at a time and each page is written out as soon as
+    // it is encoded, so a long document costs a page of memory rather than the whole job.
+    let result = match input_file.as_deref() {
+        Some(path) => match fs::File::open(path) {
+            Ok(file) => encode_raster_stream(file, &mut out, &opts),
+            Err(e) => return fail(&format!("opening {path}: {e}")),
+        },
+        None => encode_raster_stream(io::stdin().lock(), &mut out, &opts),
+    };
+
+    match result {
+        Ok(pages) => {
+            if let Err(e) = out.flush() {
+                return fail(&format!("writing the job to stdout: {e}"));
             }
             eprintln!(
-                "p1005-filter: encoded {} bytes ({} raster bytes, pjl={}, encoding={:?})",
-                bytes.len(),
-                raster.len(),
-                opts.pjl,
-                opts.encoding
+                "p1005-filter: encoded {pages} page(s), {} bytes (pjl={}, encoding={:?})",
+                out.bytes, opts.pjl, opts.encoding
             );
             ExitCode::SUCCESS
         }
@@ -58,14 +63,22 @@ fn fail(message: &str) -> ExitCode {
     ExitCode::from(1)
 }
 
-fn read_input(path: Option<&str>) -> io::Result<Vec<u8>> {
-    match path {
-        Some(p) => fs::read(p),
-        None => {
-            let mut buf = Vec::new();
-            io::stdin().lock().read_to_end(&mut buf)?;
-            Ok(buf)
-        }
+/// Forwards writes and counts them, so the filter can report the size of the job it produced
+/// even though it never holds the whole thing.
+struct Counting<W: Write> {
+    inner: W,
+    bytes: u64,
+}
+
+impl<W: Write> Write for Counting<W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let written = self.inner.write(buf)?;
+        self.bytes += written as u64;
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
     }
 }
 

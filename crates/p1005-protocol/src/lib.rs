@@ -288,6 +288,14 @@ impl Encoder {
         self.out.extend_from_slice(bytes);
     }
 
+    /// Move the bytes written so far into `out`, leaving the encoder empty.
+    ///
+    /// This is what lets a streaming caller hand one page at a time to the printer backend
+    /// instead of accumulating a whole job in memory.
+    pub fn drain_into(&mut self, out: &mut Vec<u8>) {
+        out.append(&mut self.out);
+    }
+
     /// Write the 4-byte `JZJZ` stream signature. Emitted once, before `START_DOC`.
     pub fn stream_signature(&mut self) {
         self.out.extend_from_slice(STREAM_SIGNATURE);

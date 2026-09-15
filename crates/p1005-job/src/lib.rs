@@ -9,9 +9,11 @@ use p1005_protocol::{
     duplex as zduplex, media, op, paper, pjl_epilogue, pjl_prologue, source, Encoder, Items,
     JobOptions, PageGeometry, PjlSettings, Reserved, JBIG_BID_MAX, JBIG_BIH_LEN,
 };
-use p1005_raster::{to_mono1, PageHeader, RasterError, RasterReader, DEFAULT_THRESHOLD};
+use p1005_raster::{to_mono1, PageHeader, RasterError, RasterStream, DEFAULT_THRESHOLD};
 
 use p1005_jbig::JbigEncoder;
+
+use std::io::{Read, Write};
 
 /// PJL density default, matching the printer's normal setting.
 pub const DEFAULT_DENSITY: u32 = 3;
@@ -68,6 +70,8 @@ impl Default for Options {
 pub enum Error {
     Raster(RasterError),
     Jbig(p1005_jbig::JbigError),
+    /// Writing the job out failed.
+    Io(String),
     /// The raster stream contained no pages.
     NoPages,
 }
@@ -89,6 +93,7 @@ impl std::fmt::Display for Error {
         match self {
             Error::Raster(e) => write!(f, "{e}"),
             Error::Jbig(e) => write!(f, "compressing the page image: {e}"),
+            Error::Io(e) => write!(f, "writing the job: {e}"),
             Error::NoPages => write!(f, "the raster stream contained no pages"),
         }
     }
@@ -217,8 +222,6 @@ pub fn geometry(header: &PageHeader, opts: &Options) -> PageGeometry {
     g
 }
 
-/// Encode one page image. Returns the chunk sequence to write between `START_PAGE` and
-/// `END_PAGE`.
 /// Write the image chunks for one already-converted 1 bpp bitmap.
 fn write_mono_image(
     enc: &mut Encoder,
@@ -256,6 +259,50 @@ fn write_image(
     write_mono_image(enc, header.jbig_width(), header.cups_height, &mono, opts)
 }
 
+/// The PJL settings a job takes from the options.
+fn pjl_settings(opts: &Options) -> PjlSettings<'_> {
+    PjlSettings {
+        density: opts.density,
+        econo_mode: opts.econo_mode,
+        jam_recovery_auto: opts.jam_recovery_auto,
+        timestamp: &opts.timestamp,
+    }
+}
+
+/// Write everything that precedes the first page: the PJL prologue, the stream signature and
+/// the document chunks. Shared by the buffered and the streaming encoder.
+fn start_job(enc: &mut Encoder, opts: &Options) {
+    if opts.pjl {
+        enc.extend_raw(&pjl_prologue(&pjl_settings(opts)));
+    }
+    enc.stream_signature();
+    enc.doc_start(&JobOptions {
+        duplex: opts.duplex,
+        ..JobOptions::default()
+    });
+}
+
+/// Write everything that follows the last page.
+fn finish_job(enc: &mut Encoder, opts: &Options) {
+    enc.doc_end();
+    if opts.pjl {
+        enc.extend_raw(&pjl_epilogue());
+    }
+}
+
+/// Hand whatever the encoder has accumulated to the writer.
+fn flush_pending<W: Write>(
+    enc: &mut Encoder,
+    pending: &mut Vec<u8>,
+    out: &mut W,
+) -> Result<(), Error> {
+    enc.drain_into(pending);
+    out.write_all(pending)
+        .map_err(|e| Error::Io(e.to_string()))?;
+    pending.clear();
+    Ok(())
+}
+
 /// Build a job around a caller-supplied sequence of pages.
 ///
 /// Both the raster path and the test-page path go through here, so the PJL wrapper, the
@@ -265,43 +312,57 @@ where
     F: FnMut(&mut Encoder) -> Result<usize, Error>,
 {
     let mut enc = Encoder::new();
-    if opts.pjl {
-        enc.extend_raw(&pjl_prologue(&PjlSettings {
-            density: opts.density,
-            econo_mode: opts.econo_mode,
-            jam_recovery_auto: opts.jam_recovery_auto,
-            timestamp: &opts.timestamp,
-        }));
-    }
-    enc.stream_signature();
-    enc.doc_start(&JobOptions {
-        duplex: opts.duplex,
-        ..JobOptions::default()
-    });
+    start_job(&mut enc, opts);
     let pages = emit_pages(&mut enc)?;
     if pages == 0 {
         return Err(Error::NoPages);
     }
-    enc.doc_end();
-    if opts.pjl {
-        enc.extend_raw(&pjl_epilogue());
-    }
+    finish_job(&mut enc, opts);
     Ok(enc.into_bytes())
 }
 
-/// Encode a whole CUPS raster stream. Returns the bytes to hand to the printer backend.
+/// Encode a CUPS raster stream to a writer, one page at a time.
+///
+/// This is what the filter uses. Peak memory is one page of raster plus one page's compressed
+/// image rather than the whole job: a fifty page Letter document at 600 dpi is over a
+/// gigabyte of raster, and nothing about producing the job needs all of it at once. Returns
+/// the number of pages written.
+pub fn encode_raster_stream<R: Read, W: Write>(
+    reader: R,
+    out: &mut W,
+    opts: &Options,
+) -> Result<usize, Error> {
+    let mut enc = Encoder::new();
+    let mut pending: Vec<u8> = Vec::new();
+
+    start_job(&mut enc, opts);
+    flush_pending(&mut enc, &mut pending, out)?;
+
+    let mut stream = RasterStream::new(reader);
+    let mut pixels: Vec<u8> = Vec::new();
+    let mut pages = 0usize;
+    while let Some(header) = stream.next_page(&mut pixels)? {
+        enc.page_start(&geometry(&header, opts));
+        write_image(&mut enc, &header, &pixels, opts)?;
+        enc.page_end(opts.duplex);
+        flush_pending(&mut enc, &mut pending, out)?;
+        pages += 1;
+    }
+    if pages == 0 {
+        return Err(Error::NoPages);
+    }
+    finish_job(&mut enc, opts);
+    flush_pending(&mut enc, &mut pending, out)?;
+    out.flush().map_err(|e| Error::Io(e.to_string()))?;
+    Ok(pages)
+}
+
+/// Encode a whole CUPS raster that is already in memory. Convenient for tests and tooling;
+/// the filter uses [`encode_raster_stream`] so that it does not have to hold a job.
 pub fn encode_raster_job(raster: &[u8], opts: &Options) -> Result<Vec<u8>, Error> {
-    let mut reader = RasterReader::new(raster);
-    encode_job(opts, |enc| {
-        let mut pages = 0usize;
-        while let Some((header, pixels)) = reader.next_page()? {
-            pages += 1;
-            enc.page_start(&geometry(&header, opts));
-            write_image(enc, &header, pixels, opts)?;
-            enc.page_end(opts.duplex);
-        }
-        Ok(pages)
-    })
+    let mut out = Vec::new();
+    encode_raster_stream(raster, &mut out, opts)?;
+    Ok(out)
 }
 
 /// Encode a single-page job from an already 1 bpp bitmap, using the stride

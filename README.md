@@ -201,6 +201,9 @@ Verified by execution, on real captured data where it matters:
 - The job builder and the JBIG oracle: all eight deterministic test pages build, walk back
   with the expected chunk sequence, and round-trip their compressed image through the
   JBIG_BIH / JBIG_BID split unchanged.
+- The streaming filter: peak memory is flat in the job size (43 MB for a 299 MB raster,
+  against 312 MB when it buffered the whole job), with byte-identical output before and
+  after, and the reference decoder still reproducing every page.
 - **The JBIG compressor.** Its output is byte-identical to the reference implementation
   across a 22-case sweep (random noise, odd widths, single rows and columns, stripe
   boundaries, widths 1 to 1200, two stripe sizes), and four of those vectors are embedded

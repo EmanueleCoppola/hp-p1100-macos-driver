@@ -81,7 +81,7 @@ invoked, move the same library behind an IPP Printer Application.
 crates/p1005-protocol   ZjStream encoder + decoder. Pure. No I/O, no deps.
                         Owns the wire format and its golden tests.
 crates/p1005-raster     CUPS raster reader + 8-bit gray -> 1 bpp. Pure. No libcups.
-crates/p1005-job        Raster stream -> whole printer job. Pure. No CUPS, no USB.
+crates/p1005-job        Raster stream -> printer job, a page at a time. Pure. No CUPS.
 crates/p1005-filter     The CUPS filter binary: a thin argv/stdin/stdout wrapper
                         around p1005-job. This is the only CUPS-aware code.
 crates/p1005-cli        Offline tooling: inspect rasters, dump streams, encode a job
@@ -95,6 +95,24 @@ sight, which is the property that made this testable on this machine at all.
 
 `p1005-usb` does not exist and is not currently needed: Apple's `usb` backend is already
 native, and the filter writes to stdout for CUPS to hand to it.
+
+**The filter streams.** It reads the raster one page at a time and hands each page's chunks to
+the backend as soon as they are encoded, so peak memory is one page plus its compressed form
+rather than the whole job. That matters at these sizes: a Letter page is 31 MB of raster at
+600 dpi, so a fifty page document is over a gigabyte of raster whose entire compressed output
+would be a few kilobytes.
+
+```text
+raster      before      after
+ 31 MB       35.6 MB     35 MB
+ 94 MB      103.1 MB     39 MB
+314 MB      312.4 MB     43 MB
+```
+
+Before the change memory tracked the raster exactly; now it is flat. The output is
+byte-identical either way, which is how the refactor was checked.
+
+
 
 ## Installation shape
 
