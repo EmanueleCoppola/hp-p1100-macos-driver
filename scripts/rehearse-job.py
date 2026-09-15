@@ -316,6 +316,51 @@ def check_ppd_option_coverage(ppd_path=None):
                ', '.join(g for g in groups if g in RASTER_OPTIONS))]
 
 
+def check_screened(raster_path, work, zc):
+    """p1102Grey=Screened2, the option that asks for HP's two-bit screening.
+
+    It needs the tone tables, which install.sh puts beside the filter and P1102_TONES points at
+    here, so both halves are checked: with them the page carries ZJI_VIDEO_BPP 2 and two
+    bi-level image entities, and without them the job stops with an error naming the file -
+    rather than quietly printing the one-bit page the job did not ask for.
+    """
+    lines = []
+    out = os.path.join(work, 'screened.zjs')
+    code, stderr, _ = run_filter(raster_path, 'p1102Grey=Screened2', out)
+    if code == 0:
+        raise Lever('p1102Grey=Screened2 produced a job even though no tone table was reachable')
+    if 'tones' not in stderr:
+        raise Lever('the failure does not name the tone table it wanted: %r' % stderr)
+    lines.append('with no tables reachable, Screened2 stops and names the file it needs')
+
+    # The tables go directly in the scratch directory: the harness removes its files at the
+    # end and has no patience for a subdirectory.
+    tables = work
+    generated = subprocess.run(
+        [sys.executable, os.path.join(HERE, 'hp-tone-table.py'), '--out', tables],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if generated.returncode != 0 or not os.path.exists(os.path.join(tables, 'sdtahs10.bin')):
+        return lines + ['(no HP driver to read the tone tables from, so the rest was skipped)']
+    for src, dst in (('sdtahs10.bin', 'p1102-400.tones'), ('sdtahr10.bin', 'p1102-600.tones')):
+        shutil.copyfile(os.path.join(tables, src), os.path.join(tables, dst))
+
+    code, stderr, _ = run_filter(raster_path, 'p1102Grey=Screened2', out,
+                                 env_overrides={'P1102_TONES': tables})
+    if code != 0:
+        raise Lever('the filter exited %d with the tables in place: %s' % (code, stderr))
+    items = {}
+    for kind, event in zc.semantic_view(open(out, 'rb').read())['events']:
+        if kind == 'chunk' and event['op'] == 'START_PAGE':
+            items = event['items']
+            break
+    got = str(items.get('VIDEO_BPP')).split()[0]
+    nbie = str(items.get('NBIE')).split()[0]
+    if got != '2' or nbie != '2':
+        raise Lever('Screened2 should make the page two bits per pixel in two entities, but it '
+                    'carries VIDEO_BPP %s and NBIE %s' % (got, nbie))
+    lines.append('with the tables reachable, the page carries VIDEO_BPP 2 and NBIE 2')
+    return lines
+
 def run_filter(raster_path, options, out_path, raw=False, env_overrides=None):
     overrides = {'P1102_RAW': '1'} if raw else {}
     if env_overrides:
@@ -542,6 +587,14 @@ def main(argv):
     try:
         for line in check_ppd_option_coverage():
             print('       %s' % line)
+    except Lever as exc:
+        return fail(str(exc))
+
+    print()
+    print("  9. the two-bit grey screening option:")
+    try:
+        for line in check_screened(raster_path, work, zc):
+            print("       %s" % line)
     except Lever as exc:
         return fail(str(exc))
 
