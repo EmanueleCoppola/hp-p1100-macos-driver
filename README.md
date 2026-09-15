@@ -158,6 +158,7 @@ same licence gate.
     p1102 raster-to-mono1 <cups-raster-file> <out.raw>
     p1102 raster-to-zjs   <cups-raster-file> <out.zjs> [--no-pjl]
     p1102 zjs-dump        <zjs-file>
+    p1102 send <job.zjs> [--device URI] [--timeout SECS]   # through Apple's backend
     p1102 wrap --bih <file> --bid <file> ... --width W --height H -o out.zjs
 
     PY=/opt/homebrew/bin/python3.13
