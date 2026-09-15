@@ -1,11 +1,12 @@
 #!/bin/sh
-# Install the native p1102 filter and create a CUPS queue for the HP LaserJet Professional P1102.
+# Install the native p1100 filter and create a CUPS queue for the HP LaserJet Professional P1100
+# family. The device URI is inherited from this Mac's HP queue, which is a P1102.
 #
 # Design rules, intentionally:
 #   - The existing HP installation is read but never written. The source PPD is only read.
 #   - A new queue is created under a new name; the working (or broken) HP queue is left
 #     exactly as it was, so this is reversible and side-by-side.
-#   - Everything we add lives under /Library/Printers/p1102, one directory to delete.
+#   - Everything we add lives under /Library/Printers/p1100, one directory to delete.
 #   - No SIP change, no system extension, no kernel extension, nothing disabled.
 #
 # `--dry-run` prints every command without running it and needs no privileges, and
@@ -14,12 +15,12 @@
 
 set -eu
 
-QUEUE=HP_LaserJet_P1102_native
+QUEUE=HP_LaserJet_P1100_native
 SOURCE_QUEUE=HP_LaserJet_Professional_P1102
-DEST=/Library/Printers/p1102
+DEST=/Library/Printers/p1100
 REPO=$(cd "$(dirname "$0")/.." && pwd)
-FILTER="$REPO/target/release/p1102-filter"
-ICON="$REPO/assets/p1102.icns"
+FILTER="$REPO/target/release/p1100-filter"
+ICON="$REPO/assets/p1100.icns"
 
 # Apple's /usr/bin/python3 is behind the Xcode licence gate, so picking it blind is what made
 # a dry run print "PPD generation would fail" and skip the artifact checks entirely - a check
@@ -83,7 +84,7 @@ die() { echo "error: $*" >&2; exit 1; }
 # The lines the generator is allowed to add, change or drop, as one pattern on a diff line.
 # Anything else is printed and fails the install, which is what catches a generator
 # regression that mangled the device description rather than the driver wiring.
-PPD_ALLOWED='^[<>] \*(%%|PPD-Adobe|NickName|[a-zA-Z_@-]+\.Translation NickName/|cupsFilter: "application/vnd\.cups-(raster|command)|cupsCommands|APPrinterUtilityPath|APPrinterIconPath|OpenUI \*p1102Grey|OrderDependency: [0-9]+ [A-Za-z]+ \*p1102Grey|Defaultp1102Grey|p1102Grey |CloseUI: \*p1102Grey|[a-zA-Z_@-]+\.Translation p1102Grey/|[a-zA-Z_@-]+\.p1102Grey )'
+PPD_ALLOWED='^[<>] \*(%%|PPD-Adobe|NickName|[a-zA-Z_@-]+\.Translation NickName/|cupsFilter: "application/vnd\.cups-(raster|command)|cupsCommands|APPrinterUtilityPath|APPrinterIconPath|OpenUI \*p1100Grey|OrderDependency: [0-9]+ [A-Za-z]+ \*p1100Grey|Defaultp1100Grey|p1100Grey |CloseUI: \*p1100Grey|[a-zA-Z_@-]+\.Translation p1100Grey/|[a-zA-Z_@-]+\.p1100Grey )'
 
 ppd_diff() {
     diff - "$1" 2>/dev/null | grep -E '^[<>]' | grep -vE "$PPD_ALLOWED" | grep -vE '^[<>] *$' || true
@@ -101,8 +102,8 @@ check_icon() {
     magic=$(head -c 4 "$icon")
     [ "$magic" = icns ] || die "$icon is not an icns container (it starts with '$magic')"
     work=$(mktemp -d) || die "cannot create a temporary directory"
-    if ! iconutil -c iconset "$icon" -o "$work/p1102.iconset" >/dev/null 2>&1 \
-       || [ ! -f "$work/p1102.iconset/icon_128x128.png" ]; then
+    if ! iconutil -c iconset "$icon" -o "$work/p1100.iconset" >/dev/null 2>&1 \
+       || [ ! -f "$work/p1100.iconset/icon_128x128.png" ]; then
         rm -rf "$work"
         die "$icon is not an icns macOS can read back; rebuild it with scripts/make-icns.py"
     fi
@@ -132,12 +133,12 @@ check_ppd() {
 
     head -1 "$ppd" | grep -q '^\*PPD-Adobe: "4\.3"' \
         || die "the generated PPD does not begin with *PPD-Adobe on line 1"
-    grep -q "^\*cupsFilter: \"application/vnd.cups-raster 100 $DEST/p1102-filter\"" "$ppd" \
-        || die "the generated PPD does not point its raster filter at $DEST/p1102-filter"
+    grep -q "^\*cupsFilter: \"application/vnd.cups-raster 100 $DEST/p1100-filter\"" "$ppd" \
+        || die "the generated PPD does not point its raster filter at $DEST/p1100-filter"
     # The icon is the one line that names a file of ours outside this check's usual reach, so
     # it is asserted directly: the row would otherwise show HP's picture, or none.
-    grep -q "^\*APPrinterIconPath: \"$DEST/p1102.icns\"$" "$ppd" \
-        || die "the generated PPD does not point *APPrinterIconPath at $DEST/p1102.icns"
+    grep -q "^\*APPrinterIconPath: \"$DEST/p1100.icns\"$" "$ppd" \
+        || die "the generated PPD does not point *APPrinterIconPath at $DEST/p1100.icns"
     if grep -E '^\*APPrinterIconPath:.*(/Library/Printers/hp|hp1100)' "$ppd" >/dev/null; then
         die "the generated PPD still points its icon into HP's installation"
     fi
@@ -284,18 +285,18 @@ OWNER=
 if [ "$SYSTEM" = 1 ]; then
     OWNER="-o root -g wheel"
 fi
-run /usr/bin/install -m 0755 $OWNER "$FILTER" "$DEST/p1102-filter"
-run /usr/bin/install -m 0644 $OWNER "$ICON" "$DEST/p1102.icns"
+run /usr/bin/install -m 0755 $OWNER "$FILTER" "$DEST/p1100-filter"
+run /usr/bin/install -m 0644 $OWNER "$ICON" "$DEST/p1100.icns"
 # The two tone tables the two-bit grey screening uses. They are HP data, so the installer
 # reads them out of the HP driver on this machine rather than carrying them here. A machine
-# without that driver still gets a working queue: only p1102Grey=Screened2 would fail, and
+# without that driver still gets a working queue: only p1100Grey=Screened2 would fail, and
 # the filter says so when it is asked for it.
 if [ "$PYTHON_OK" = 1 ] && [ -f "$REPO/scripts/hp-tone-table.py" ]; then
-    tones_tmp=$(mktemp -d -t p1102-tones) || die "cannot create a temporary directory"
+    tones_tmp=$(mktemp -d -t p1100-tones) || die "cannot create a temporary directory"
     if "$PYTHON" "$REPO/scripts/hp-tone-table.py" --out "$tones_tmp" >/dev/null 2>&1 \
         && [ -s "$tones_tmp/sdtahs10.bin" ] && [ -s "$tones_tmp/sdtahr10.bin" ]; then
-        run /usr/bin/install -m 0644 $OWNER "$tones_tmp/sdtahs10.bin" "$DEST/p1102-400.tones"
-        run /usr/bin/install -m 0644 $OWNER "$tones_tmp/sdtahr10.bin" "$DEST/p1102-600.tones"
+        run /usr/bin/install -m 0644 $OWNER "$tones_tmp/sdtahs10.bin" "$DEST/p1100-400.tones"
+        run /usr/bin/install -m 0644 $OWNER "$tones_tmp/sdtahr10.bin" "$DEST/p1100-600.tones"
     else
         echo "note: no HP driver to read the tone tables from, so this queue will not offer"
         echo "      the two-bit grey screening. Everything else is unaffected."
@@ -306,27 +307,27 @@ fi
 
 echo
 echo "   tone tables: an unprivileged copy is generated from the installed HP driver and"
-echo "                installed as p1102-400.tones and p1102-600.tones, which is what"
-echo "                p1102Grey=Screened2 reads."
+echo "                installed as p1100-400.tones and p1100-600.tones, which is what"
+echo "                p1100Grey=Screened2 reads."
 if [ "$DRY" = 1 ]; then
     # Generate the PPD somewhere harmless and check it, so a dry run says something about
     # the artifact as well as about the commands.
     if [ "$PYTHON_OK" = 1 ]; then
-        probe_ppd=$(mktemp -t p1102-ppd-check.ppd) || die "cannot create a temporary file"
+        probe_ppd=$(mktemp -t p1100-ppd-check.ppd) || die "cannot create a temporary file"
         # A subshell with its own trap, so the file goes away however this ends - including the
         # check failing, which is how one was left behind after the check's first version died.
         (
             trap 'rm -f "$probe_ppd"' EXIT
-            "$PYTHON" "$REPO/scripts/make-ppd.py" "$SRC_PPD" "$DEST/p1102-filter" "$probe_ppd" \
-                --icon "$DEST/p1102.icns" || exit 1
+            "$PYTHON" "$REPO/scripts/make-ppd.py" "$SRC_PPD" "$DEST/p1100-filter" "$probe_ppd" \
+                --icon "$DEST/p1100.icns" || exit 1
             check_ppd "$probe_ppd"
         ) || die "the PPD could not be generated or did not pass its check"
     fi
 else
-    run "$PYTHON" "$REPO/scripts/make-ppd.py" "$SRC_PPD" "$DEST/p1102-filter" "$DEST/p1102.ppd" \
-        --icon "$DEST/p1102.icns"
+    run "$PYTHON" "$REPO/scripts/make-ppd.py" "$SRC_PPD" "$DEST/p1100-filter" "$DEST/p1100.ppd" \
+        --icon "$DEST/p1100.icns"
     # Before the queue is created, not after: a PPD CUPS cannot use must not reach lpadmin.
-    check_ppd "$DEST/p1102.ppd"
+    check_ppd "$DEST/p1100.ppd"
 fi
 
 echo
@@ -337,7 +338,7 @@ else
     if [ "$FORCE" = 1 ]; then
         run lpadmin -x "$QUEUE" 2>/dev/null || true
     fi
-    run lpadmin -p "$QUEUE" -E -v "$DEVICE" -P "$DEST/p1102.ppd"
+    run lpadmin -p "$QUEUE" -E -v "$DEVICE" -P "$DEST/p1100.ppd"
     run lpadmin -p "$QUEUE" -o printer-is-shared=false
     run cupsenable "$QUEUE"
     run cupsaccept "$QUEUE"

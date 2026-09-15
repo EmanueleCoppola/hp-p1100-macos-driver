@@ -22,13 +22,13 @@
 
 set -eu
 
-ORACLE_DIR=${P1102_FOO2ZJS_DIR:-$HOME/.cache/p1102-foo2zjs}
+ORACLE_DIR=${P1100_FOO2ZJS_DIR:-$HOME/.cache/p1100-foo2zjs}
 SRC="$ORACLE_DIR/src"
 URL=https://github.com/OpenPrinting/foo2zjs/archive/refs/heads/master.tar.gz
 # Pinned like the jbigkit bottle. The tarball tracks upstream's branch, so if upstream
 # moves, the checksum changes and this stops rather than silently testing against
-# something else: check the new tarball and set P1102_FOO2ZJS_SHA to accept it.
-SHA=${P1102_FOO2ZJS_SHA:-77317fdc1c8282c28f1410d557c521b1d7d7201a208854d2a0910f47b95b839b}
+# something else: check the new tarball and set P1100_FOO2ZJS_SHA to accept it.
+SHA=${P1100_FOO2ZJS_SHA:-77317fdc1c8282c28f1410d557c521b1d7d7201a208854d2a0910f47b95b839b}
 
 TOOLCHAIN=/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin
 CLT_TOOLCHAIN=/Library/Developer/CommandLineTools/usr/bin
@@ -83,7 +83,7 @@ fetch() {
         echo "error: tarball checksum mismatch" >&2
         echo "  expected $SHA" >&2
         echo "  actual   $actual" >&2
-        echo "  upstream may have moved; inspect the new tarball and set P1102_FOO2ZJS_SHA" >&2
+        echo "  upstream may have moved; inspect the new tarball and set P1100_FOO2ZJS_SHA" >&2
         exit 1
     fi
     mkdir -p "$ORACLE_DIR/extract"

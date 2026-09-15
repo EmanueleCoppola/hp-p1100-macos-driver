@@ -253,7 +253,7 @@ def cups_queues():
 def human(devices, queues, show_all, backend=None):
     printers = [d for d in devices if is_printer(d)]
 
-    print('P1102 pre-flight (read-only)')
+    print('P1100 pre-flight (read-only)')
     print()
     print('CUPS queues on a USB device:')
     if not queues:

@@ -22,8 +22,8 @@ set -eu
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 cd "$REPO"
 
-QUEUE=HP_LaserJet_P1102_rehearsal
-SYSTEM_DEST=/Library/Printers/p1102
+QUEUE=HP_LaserJet_P1100_rehearsal
+SYSTEM_DEST=/Library/Printers/p1100
 SOURCE_QUEUE=HP_LaserJet_Professional_P1102
 KEEP=0
 
@@ -36,8 +36,8 @@ while [ $# -gt 0 ]; do
     shift
 done
 
-work=$(mktemp -d -t p1102-install-rehearsal)
-DEST="$work/p1102"
+work=$(mktemp -d -t p1100-install-rehearsal)
+DEST="$work/p1100"
 failures=0
 
 if [ "$KEEP" = 0 ]; then
@@ -49,9 +49,9 @@ bad() { printf '  %-58s FAILED: %s\n' "$1" "$2"; failures=$((failures + 1)); }
 
 echo 'rehearsing the install, into a scratch directory'
 
-[ -x "$REPO/target/release/p1102-filter" ] || {
+[ -x "$REPO/target/release/p1100-filter" ] || {
     echo 'error: build the filter first: scripts/build-native.sh' >&2; exit 2; }
-[ -f "$REPO/assets/p1102.icns" ] || {
+[ -f "$REPO/assets/p1100.icns" ] || {
     echo 'error: build the icon first: scripts/make-icns.py' >&2; exit 2; }
 
 device_before=$(lpstat -v "$SOURCE_QUEUE" 2>/dev/null || true)
@@ -65,23 +65,23 @@ then
 fi
 
 # --- what should be there --------------------------------------------------------------
-for f in p1102-filter p1102.ppd p1102.icns; do
+for f in p1100-filter p1100.ppd p1100.icns; do
     [ -f "$DEST/$f" ] && ok "$f is in the destination" || bad "$f is in the destination" 'missing'
 done
-[ -x "$DEST/p1102-filter" ] && ok 'the installed filter is executable' \
+[ -x "$DEST/p1100-filter" ] && ok 'the installed filter is executable' \
     || bad 'the installed filter is executable' 'not executable'
-cmp -s "$DEST/p1102-filter" "$REPO/target/release/p1102-filter" \
+cmp -s "$DEST/p1100-filter" "$REPO/target/release/p1100-filter" \
     && ok 'the installed filter is the build, byte for byte' \
     || bad 'the installed filter is the build, byte for byte' 'differs'
-cmp -s "$DEST/p1102.icns" "$REPO/assets/p1102.icns" \
+cmp -s "$DEST/p1100.icns" "$REPO/assets/p1100.icns" \
     && ok 'the installed icon is the built one' \
     || bad 'the installed icon is the built one' 'differs'
 
 # The tone tables are HP's data, read out of HP's driver; on a machine without it the installer
 # says so and installs nothing there, which is the documented behaviour rather than a failure.
-if [ -f "$DEST/p1102-400.tones" ] && [ -f "$DEST/p1102-600.tones" ]; then
-    four=$(wc -c <"$DEST/p1102-400.tones" | tr -d ' ')
-    six=$(wc -c <"$DEST/p1102-600.tones" | tr -d ' ')
+if [ -f "$DEST/p1100-400.tones" ] && [ -f "$DEST/p1100-600.tones" ]; then
+    four=$(wc -c <"$DEST/p1100-400.tones" | tr -d ' ')
+    six=$(wc -c <"$DEST/p1100-600.tones" | tr -d ' ')
     [ "$four" = 12288 ] && [ "$six" = 12288 ] \
         && ok 'both tone tables are the 12288-byte tables' \
         || bad 'both tone tables are the 12288-byte tables' "$four and $six bytes"
@@ -91,10 +91,10 @@ else
         || bad 'no tone tables, and the installer said why' 'missing without a note'
 fi
 
-grep -q "^\*cupsFilter: \"application/vnd.cups-raster 100 $DEST/p1102-filter\"" "$DEST/p1102.ppd" \
+grep -q "^\*cupsFilter: \"application/vnd.cups-raster 100 $DEST/p1100-filter\"" "$DEST/p1100.ppd" \
     && ok 'the PPD points its raster filter into the destination' \
     || bad 'the PPD points its raster filter into the destination' 'no such line'
-grep -q "^\*APPrinterIconPath: \"$DEST/p1102.icns\"$" "$DEST/p1102.ppd" \
+grep -q "^\*APPrinterIconPath: \"$DEST/p1100.icns\"$" "$DEST/p1100.ppd" \
     && ok 'the PPD points its icon into the destination' \
     || bad 'the PPD points its icon into the destination' 'no such line'
 

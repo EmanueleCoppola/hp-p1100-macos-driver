@@ -409,7 +409,7 @@ def main(argv):
 
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--out', default=os.path.join(root, 'assets', 'p1102.icns'))
+    ap.add_argument('--out', default=os.path.join(root, 'assets', 'p1100.icns'))
     ap.add_argument('--photo', default=default_photo,
                     help='photograph to relabel and use (default assets/p1102-photo.webp)')
     ap.add_argument('--drawn', action='store_true', help='draw the icon instead')
@@ -425,7 +425,7 @@ def main(argv):
         if shutil.which(tool) is None:
             raise SystemExit('error: %s is required and was not found' % tool)
 
-    work = tempfile.mkdtemp(prefix='p1102-iconset.')
+    work = tempfile.mkdtemp(prefix='p1100-iconset.')
     try:
         if args.drawn:
             how = 'the drawn icon'
@@ -445,7 +445,7 @@ def main(argv):
             square_png = os.path.join(work, 'square.png')
             write_png(square_png, side, canvas)
 
-        iconset = os.path.join(work, 'p1102.iconset')
+        iconset = os.path.join(work, 'p1100.iconset')
         os.makedirs(iconset)
         for name, size in ICONSET:
             target = os.path.join(iconset, name)

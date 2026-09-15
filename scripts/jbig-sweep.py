@@ -112,7 +112,7 @@ def main(argv):
     if not os.path.exists(os.path.join(probe.stdout.decode().strip(), 'jbigkit')):
         raise SystemExit('fetch the oracle first: scripts/jbig-oracle.sh fetch')
 
-    work = tempfile.mkdtemp(prefix='p1102-jbig-sweep-')
+    work = tempfile.mkdtemp(prefix='p1100-jbig-sweep-')
     checked = 0
     failures = []
     for name, width, height, rows in cases():

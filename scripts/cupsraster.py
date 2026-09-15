@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Read-only CUPS raster inspector using the layout measured on macOS 27.
 
-This mirrors `crates/p1102-raster`, so the two can be cross-checked. Offsets are
+This mirrors `crates/p1100-raster`, so the two can be cross-checked. Offsets are
 `offsetof()` into CUPS's current `cups_page_header2_t`, which has no Magic/Version/
 HeaderSize members: the sync word carries that role and is written once per stream.
 

@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Build a complete, reference-correct ZjStream job for the HP LaserJet Professional P1102.
+"""Build a complete, reference-correct ZjStream job for the HP LaserJet Professional P1100 family.
+The reference-correctness was established against a P1102, the model this driver was developed
+on and the one it is currently tested on.
 
 This exists so the printer can be brought up on hardware *now*, before our own JBIG
 encoder is written. It uses the reference encoder (scripts/jbig-oracle.sh) for the
 compressed image - so the payload is known-good - and our own code for everything else:
 the ZjStream chunk framing, the item sets and their order, and the PJL wrapper, all of
-which mirror crates/p1102-protocol exactly.
+which mirror crates/p1100-protocol exactly.
 
-The shipped filter now compresses with our own Rust encoder (crates/p1102-jbig) rather
+The shipped filter now compresses with our own Rust encoder (crates/p1100-jbig) rather
 than an external process. This tool stays useful for two things the filter cannot do:
 producing a payload compressed by the *reference* implementation, so a printer rejection
 can be attributed to the printer rather than to our encoder, and emitting the
@@ -53,7 +55,7 @@ PAGES = {
 
 DEFAULT_DPI = 600
 
-# ZjStream opcodes and item tags, mirroring crates/p1102-protocol.
+# ZjStream opcodes and item tags, mirroring crates/p1100-protocol.
 OP_START_DOC, OP_END_DOC, OP_START_PAGE, OP_END_PAGE = 0, 1, 2, 3
 OP_JBIG_BIH, OP_JBIG_BID, OP_END_JBIG, OP_RAW_IMAGE = 4, 5, 6, 8
 IT_DMCOLLATE, IT_DMDUPLEX, IT_DMPAPER = 1, 2, 3
@@ -120,7 +122,7 @@ def make_bitmap(pattern, w, h):
                     plot(x, y)
     elif pattern == 'gray':
         # Eight bands of increasing ink density (1/8 .. 8/8), matching the Rust generator
-        # in crates/p1102-job so both tools produce the same page.
+        # in crates/p1100-job so both tools produce the same page.
         bands = 8
         band_h = h // bands
         for b in range(bands):
@@ -219,7 +221,7 @@ def pjl_epilogue():
 
 
 def build_job(bie, width, height, dpi, paper, opts):
-    """Mirror crates/p1102-job exactly: item sets, order and chunk sequence.
+    """Mirror crates/p1100-job exactly: item sets, order and chunk sequence.
 
     The item sets matter for bring-up: whatever this emits is what the printer sees, so it
     has to match what the Rust filter emits for the same options. In particular EconoMode
@@ -395,7 +397,7 @@ def main(argv):
 
     bie = None
     if not opts.raw:
-        pbm = opts.keep_pbm or os.path.join(os.environ.get('TMPDIR', '/tmp'), 'p1102-test.pbm')
+        pbm = opts.keep_pbm or os.path.join(os.environ.get('TMPDIR', '/tmp'), 'p1100-test.pbm')
         write_pbm(pbm, opts.bitmap, align128(w), h, stride)
         jbg = pbm + '.jbg'
         subprocess.check_call(['%s/jbig-oracle.sh' % HERE, 'encode', pbm, jbg])

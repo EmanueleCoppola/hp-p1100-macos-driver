@@ -7,8 +7,8 @@
 // reference-verified Python path rather than only being unit tested.
 //
 // Usage:
-//   cargo build --target wasm32-wasip1 -p p1102-cli --offline
-//   node scripts/wasi-run.mjs target/wasm32-wasip1/debug/p1102.wasm <args...>
+//   cargo build --target wasm32-wasip1 -p p1100-cli --offline
+//   node scripts/wasi-run.mjs target/wasm32-wasip1/debug/p1100.wasm <args...>
 
 import { readFile } from 'node:fs/promises';
 import { WASI } from 'node:wasi';
@@ -33,7 +33,7 @@ const wasi = new WASI({
 const module = await WebAssembly.compile(await readFile(wasmPath));
 const instance = await WebAssembly.instantiate(module, wasi.getImportObject());
 const code = wasi.start(instance);
-if (process.env.P1102_WASI_DEBUG) {
+if (process.env.P1100_WASI_DEBUG) {
   console.error('[wasi-run] guest returned exit code', code);
 }
 process.exit(code ?? 0);

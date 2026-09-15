@@ -5,12 +5,12 @@ scripts/make-test-job.py is what a first hardware test uses: it draws a pattern,
 with the reference JBIG encoder, and frames a job around it, so a printer that rejects that job
 is rejecting our framing rather than our compressor. That makes a defect in it expensive - it
 would read as "the printer does not accept our protocol", which is the one thing the bring-up is
-supposed to settle. Its framing is Python, mirroring crates/p1102-protocol, and until this script
+supposed to settle. Its framing is Python, mirroring crates/p1100-protocol, and until this script
 existed nothing was comparing the two.
 
   make-test-job.py    -> job A     Python framing, reference-compressed image
-  p1102 wrap          -> job B     the Rust framing, the same image, byte for byte
-  p1102 test-page     -> job C     the Rust drawing and framing, same patterns
+  p1100 wrap          -> job B     the Rust framing, the same image, byte for byte
+  p1100 test-page     -> job C     the Rust drawing and framing, same patterns
 
 All three have to be the same job: identical where that is possible, and semantically identical
 (scripts/zjs-compare.py, ignoring the timestamp line) where the clock makes the bytes differ.
@@ -39,8 +39,8 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
-CLI = os.path.join(REPO, 'target/release/p1102')
-FILTER = os.path.join(REPO, 'target/release/p1102-filter')
+CLI = os.path.join(REPO, 'target/release/p1100')
+FILTER = os.path.join(REPO, 'target/release/p1100-filter')
 MAKE_JOB = os.path.join(HERE, 'make-test-job.py')
 ORACLE = os.path.join(HERE, 'jbig-oracle.sh')
 PPD = '/etc/cups/ppd/HP_LaserJet_Professional_P1102.ppd'
@@ -93,7 +93,7 @@ def main(argv):
             raise SystemExit('%s is not built: scripts/build-native.sh' % how)
     zc = load('zjs-compare')
 
-    work = args.keep or tempfile.mkdtemp(prefix='p1102-bringup-')
+    work = args.keep or tempfile.mkdtemp(prefix='p1100-bringup-')
     failures = 0
 
     print('the bring-up job against the shipped framing, for the same page image')
