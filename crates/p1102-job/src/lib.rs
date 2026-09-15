@@ -32,6 +32,29 @@ pub enum ImageEncoding {
     Raw,
 }
 
+/// The two tone tables HP's driver chooses between, by the marker its PPD puts in the raster
+/// header: the 400 dpi cell and the 600 dpi one.
+#[derive(Debug, Clone)]
+pub struct ToneTables {
+    pub at_400: Vec<u8>,
+    pub at_600: Vec<u8>,
+}
+
+impl ToneTables {
+    /// Which table a page uses. `cupsCompression` is the marker HP's PPD writes through the
+    /// page device - 401 for the 600x400dpi choice, 1 for 600x600dpi - and HP's driver reads
+    /// it back as `bits = (compression & 1) + 1` and `vdpi = compression & 0x3ffe`. The mask
+    /// is what tells 400 dpi from 600, and the 400 dpi engine is the one that wants the
+    /// coarser cell.
+    pub fn for_page(&self, header: &PageHeader) -> &[u8] {
+        if header.cups_compression & 0x3ffe == 400 {
+            &self.at_400
+        } else {
+            &self.at_600
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Options {
     /// Wrap the stream in the PJL prologue/epilogue.
@@ -47,10 +70,10 @@ pub struct Options {
     pub duplex: u32,
     pub encoding: ImageEncoding,
     pub threshold: u8,
-    /// A tone table to screen grey through, HP's own, which makes the page two bits per
+    /// The tone tables to screen grey through, HP's own, which make the page two bits per
     /// pixel instead of one. `scripts/hp-tone-table.py --out DIR` writes these files out of
     /// the installed driver; `None` is the one-bit thresholding path.
-    pub tone_table: Option<Vec<u8>>,
+    pub tone_tables: Option<ToneTables>,
     /// Override `DMPAPER`; `None` derives it from the raster's page size name.
     pub paper: Option<u32>,
 }
@@ -67,7 +90,7 @@ impl Default for Options {
             duplex: zduplex::OFF,
             encoding: ImageEncoding::Jbig,
             threshold: DEFAULT_THRESHOLD,
-            tone_table: None,
+            tone_tables: None,
             paper: None,
         }
     }
@@ -291,7 +314,7 @@ pub fn geometry(header: &PageHeader, opts: &Options) -> PageGeometry {
     g.source = opts.source;
     // Two-bit screening changes the page's depth, and the items follow from it: VIDEO_BPP,
     // VIDEO_X and NBIE all come from `bits_per_pixel`.
-    g.bits_per_pixel = if opts.tone_table.is_some() { 2 } else { 1 };
+    g.bits_per_pixel = if opts.tone_tables.is_some() { 2 } else { 1 };
     // The media type code the PPD put into the raster header is the authoritative one for
     // the medium that was actually selected, so it is forwarded rather than re-derived
     // from the option name. Falls back to standard when it is unset.
@@ -337,10 +360,11 @@ fn write_image(
     pixels: &[u8],
     opts: &Options,
 ) -> Result<(), Error> {
-    let Some(table) = opts.tone_table.as_deref() else {
+    let Some(tables) = opts.tone_tables.as_ref() else {
         let mono = to_mono1(header, pixels, opts.threshold)?;
         return write_mono_image(enc, header.jbig_width(), header.cups_height, &mono, opts);
     };
+    let table = tables.for_page(header);
     if opts.encoding != ImageEncoding::Jbig {
         return Err(Error::Unsupported(
             "the two-bit page is only produced as a JBIG image; the raw image layout for two \
@@ -758,7 +782,7 @@ mod timestamp_tests {
 mod tests {
     use super::*;
     use p1102_protocol::{decode, op as pop, op_name, strip_pjl_framing, STREAM_SIGNATURE};
-    use p1102_raster::{color_space, compression, encode_page_header, SYNC_RASTER3};
+    use p1102_raster::{encode_page_header, SYNC_RASTER3};
 
     fn mono_header(width: u32, height: u32, name: &str) -> PageHeader {
         PageHeader {
@@ -1409,5 +1433,84 @@ mod tests {
             let c = chunks.iter().find(|c| c.header.ty == ty).unwrap();
             assert_eq!(c.items.len(), 1, "{ty} should carry DMDUPLEX");
         }
+    }
+}
+
+#[cfg(test)]
+mod tone_table_tests {
+    use super::*;
+    use p1102_protocol::{decode, strip_pjl_framing, STREAM_SIGNATURE};
+    use p1102_raster::{encode_page_header, PageHeader, SYNC_RASTER3};
+
+    fn header(width: u32, height: u32, compression: u32) -> PageHeader {
+        PageHeader {
+            cups_width: width,
+            cups_height: height,
+            cups_bytes_per_line: width,
+            cups_compression: compression,
+            ..PageHeader::default()
+        }
+    }
+
+    fn raster(compression: u32) -> Vec<u8> {
+        let mut out = SYNC_RASTER3.to_ne_bytes().to_vec();
+        out.extend_from_slice(&encode_page_header(&header(16, 2, compression)));
+        out.extend((0..32u32).map(|i| (i * 8) as u8));
+        out
+    }
+
+    fn table(level: u8) -> Vec<u8> {
+        let mut t = vec![0u8; p1102_raster::TONE_TABLE_LEN];
+        for byte in t.iter_mut() {
+            *byte = level * 0x55;
+        }
+        t
+    }
+
+    /// The marker HP's PPD leaves in the raster header picks the table: 401 is the 400 dpi
+    /// engine, whose cell is the coarser one, and anything else is the 600 dpi cell.
+    #[test]
+    fn the_compression_marker_picks_the_table() {
+        let tables = ToneTables {
+            at_400: table(0),
+            at_600: table(3),
+        };
+        assert_eq!(
+            tables.for_page(&header(16, 2, 401)),
+            tables.at_400.as_slice()
+        );
+        assert_eq!(tables.for_page(&header(16, 2, 1)), tables.at_600.as_slice());
+        assert_eq!(tables.for_page(&header(16, 2, 0)), tables.at_600.as_slice());
+    }
+
+    /// And it reaches the page image: a page marked 401 comes out exactly as it would with the
+    /// 400 dpi table in both slots, and differently from the same page marked for 600 dpi.
+    #[test]
+    fn the_marker_reaches_the_image() {
+        let as_400 = Options {
+            tone_tables: Some(ToneTables {
+                at_400: table(0),
+                at_600: table(3),
+            }),
+            ..Options::default()
+        };
+        let both_400 = Options {
+            tone_tables: Some(ToneTables {
+                at_400: table(0),
+                at_600: table(0),
+            }),
+            ..Options::default()
+        };
+        let marked_400 = encode_raster_job(&raster(401), &as_400).unwrap();
+        assert_eq!(
+            marked_400,
+            encode_raster_job(&raster(401), &both_400).unwrap()
+        );
+        assert_ne!(marked_400, encode_raster_job(&raster(1), &as_400).unwrap());
+
+        // A sanity check on the fixture itself: the job is a real one.
+        let body = strip_pjl_framing(&marked_400);
+        assert_eq!(&body[..4], STREAM_SIGNATURE);
+        assert!(!decode(body).unwrap().is_empty());
     }
 }

@@ -270,7 +270,12 @@ fn raster_to_zjs(args: &[String]) -> Result<(), String> {
     }
     let opts = JobOpts {
         pjl: !args.iter().any(|a| a == "--no-pjl"),
-        tone_table,
+        // One table for both slots: this command is for trying a page out, and which of the two
+        // HP's marker selects is the filter's business, not its.
+        tone_tables: tone_table.map(|t| p1102_job::ToneTables {
+            at_400: t.clone(),
+            at_600: t,
+        }),
         ..JobOpts::default()
     };
     let job = encode_raster_job(&raster, &opts).map_err(|e| e.to_string())?;

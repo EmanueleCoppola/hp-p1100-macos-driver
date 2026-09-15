@@ -454,6 +454,10 @@ The item side is done with it: `PageGeometry`'s `bits_per_pixel` is what `ZJI_VI
 `ZJI_VIDEO_X` and `ZJI_NBIE` are computed from, and the job layer sets it from the same option
 that selects the screening, so a two-bit page announces itself consistently.
 
+That marker also picks the table: `ToneTables::for_page` takes the 400 dpi cell when `cupsCompression & 0x3ffe` is 400 and the 600 dpi one otherwise, which is what the bullet
+above says HP does with it, and the job layer tests both halves: the page marked 401 comes out
+exactly as it would with the 400 dpi table in both slots.
+
 The framing is what needs the printer. HP's page items come from `zcups::Formatter::startPage`,
 which takes the depth as its third argument and reads a `bitsPerPixel` property, and whether
 plane records are written at all is behind three `zjs::BandWriter` flags - `sendPlaneItem`,
