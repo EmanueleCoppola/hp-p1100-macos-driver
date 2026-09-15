@@ -11,8 +11,9 @@ Every piece of that is real: the raster comes from the same filter CUPS would ru
 is produced by our actual filter binary with the argv shape CUPS uses, and the result is
 decoded by the reference implementation of the standard rather than by our own code.
 
-The filter is run from its wasm build, because linking a native binary needs Apple's linker
-and that is behind the Xcode licence gate. See docs/testing.md.
+The filter is run from its native build when there is one - that is the artifact that would be
+installed - and from the wasm build otherwise, which links with Rust's own bundled linker and
+needs no SDK at all. See docs/testing.md.
 
 Usage:
   scripts/rehearse-job.py [--options "Duplex=DuplexNoTumble"] [--text FILE] [--keep DIR]
