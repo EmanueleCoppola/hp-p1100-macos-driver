@@ -9,7 +9,7 @@
 //! p1102 raster-to-zjs <cups-raster-file> <out.zjs> [--no-pjl]
 //! p1102 zjs-dump      <zjs-file>
 //! p1102 wrap --bih <file> [--bid <file> ...] --width W --height H --resolution R \
-//!            [--paper-code N] [--no-pjl] -o <out.zjs>
+//!            [--bits N] [--paper-code N] [--no-pjl] -o <out.zjs>
 //! ```
 
 use std::env;
@@ -63,7 +63,7 @@ USAGE:
                                   [--raw] [--no-pjl] [--list]
   p1102 zjs-dump       <zjs-file>
   p1102 wrap --bih <file> [--bid <file> ...] --width W --height H --resolution R
-             [--paper-code N] [--no-pjl] -o <out.zjs>
+             [--bits N] [--paper-code N] [--no-pjl] -o <out.zjs>
 
 NOTES:
   raster-to-zjs and test-page produce complete, printable jobs: the page image is JBIG
@@ -79,7 +79,10 @@ NOTES:
       lp -d P1102_raw -o raw /tmp/square.zjs
 
   `wrap` frames an *already encoded* JBIG image, which is how a reference-compressed
-  payload can be produced for comparison; see scripts/make-test-job.py.";
+  payload can be produced for comparison; see scripts/make-test-job.py. --bits says how many
+  bits per pixel the framed image holds, which is what ZJI_VIDEO_BPP, ZJI_NBIE and ZJI_VIDEO_X
+  are written from: 1 (the default) for a bi-level page, 2 for the two-bit page HP's driver
+  screens grey into (docs/differences.md item 11).";
 
 /// Measured 600 dpi page geometry, the same page images cgpdftoraster produces.
 const TEST_PAGES: [(&str, u32, u32, u32); 3] = [
@@ -351,6 +354,7 @@ fn wrap(args: &[String]) -> Result<(), String> {
     let mut height = 0u32;
     let mut resolution = 600u32;
     let mut paper = p1102_protocol::paper::LETTER;
+    let mut bits = 1u32;
     let mut pjl = true;
 
     let mut i = 0;
@@ -382,6 +386,13 @@ fn wrap(args: &[String]) -> Result<(), String> {
             }
             "--paper-code" => {
                 paper = need(i)?.parse().map_err(|_| "bad --paper-code")?;
+                i += 2;
+            }
+            "--bits" => {
+                bits = need(i)?.parse().map_err(|_| "bad --bits")?;
+                if !(1..=4).contains(&bits) {
+                    return Err("--bits must be between 1 and 4".into());
+                }
                 i += 2;
             }
             "--no-pjl" => {
@@ -418,6 +429,7 @@ fn wrap(args: &[String]) -> Result<(), String> {
 
     let mut g = PageGeometry::mono(width, height, resolution);
     g.paper = paper;
+    g.bits_per_pixel = bits;
 
     let mut enc = Encoder::new();
     let mut file = Vec::new();

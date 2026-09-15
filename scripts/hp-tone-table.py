@@ -20,7 +20,15 @@ Usage:
     scripts/hp-tone-table.py                 check the structure and print a summary
     scripts/hp-tone-table.py --grid 128      print the cell one grey level maps to
     scripts/hp-tone-table.py --out DIR       write one 12288-byte file per table
+    scripts/hp-tone-table.py --convert RASTER --pages DIR
+                                             screen a CUPS raster into 2-bit pages
     scripts/hp-tone-table.py --selftest      run the same checks on a synthetic table
+
+The conversion is the driver's, not an invention: for each pixel the table is indexed by the
+8-bit grey value, and inside that entry by the pixel's column group and its row, where the row
+counts *down* as the page is walked down (the driver's line counter is the page height rounded
+up to 12, less the line number, so the row is (-y) % 12). Each byte holds four 2-bit cells, one
+per column in a group of four. What comes out is what HP's driver sends for this printer.
 
 Exit status 0 when the tables decode as documented, 1 when they do not.
 """
@@ -133,6 +141,107 @@ def check(name, data, off, verbose=True):
     return cells
 
 
+def level_of(table, grey, x, y):
+    """One pixel's level, with the driver's indexing and its row phase.
+
+    The row comes from the call's line counter, which is the page height rounded up to a
+    multiple of 12 less the line number - so it is (-y) % 12, and the cell is walked upwards
+    as the page is walked downwards. The column picks the byte by its group of four (only the
+    first three bytes of a row are ever reached, because the counter wraps at 12) and the
+    2-bit field inside it by its position in that group.
+    """
+    size, row_bytes = entry_size()
+    byte = table[grey * size + ((-y) % ROWS) * row_bytes + ((x % COLS) // 4)]
+    return (byte >> (6 - 2 * (x % 4))) & 3
+
+
+def tiny_raster(path, width, height, rows, page_size_name=b'Letter'):
+    """A one-page RaS3 raster: enough for the readers and writers in this repository."""
+    cupsraster = load('cupsraster')
+    header = bytearray(cupsraster.PAGE_HEADER_LEN)
+    struct.pack_into('<I', header, cupsraster.CUPS_WIDTH, width)
+    struct.pack_into('<I', header, cupsraster.CUPS_HEIGHT, height)
+    struct.pack_into('<I', header, cupsraster.CUPS_BITS_PER_COLOR, 8)
+    struct.pack_into('<I', header, cupsraster.CUPS_BITS_PER_PIXEL, 8)
+    struct.pack_into('<I', header, cupsraster.CUPS_BYTES_PER_LINE, width)
+    struct.pack_into('<I', header, cupsraster.CUPS_NUM_COLORS, 1)
+    struct.pack_into('<II', header, cupsraster.HW_RESOLUTION, 600, 600)
+    at = cupsraster.CUPS_PAGE_SIZE_NAME
+    header[at:at + len(page_size_name)] = page_size_name
+    with open(path, 'wb') as f:
+        f.write(struct.pack('<I', cupsraster.SYNC_RASTER3))
+        f.write(bytes(header))
+        for row in rows:
+            f.write(bytes(row))
+    return path
+
+
+def convert(raster_path, table, out_dir, stem='page'):
+    """Screen each page of a CUPS raster into the two-bit page the driver would have sent.
+
+    The page is written at the *aligned* width the encoder works in - the true width rounded
+    up to a multiple of 128 - so the BIH's XD comes out the same as the one a one-bit job
+    carries, and the padding pixels take the lightest level, which is what a zero padding bit
+    means in the one-bit path.
+    """
+    cupsraster = load('cupsraster')
+    os.makedirs(out_dir, exist_ok=True)
+    size, row_bytes = entry_size()
+    # One 256-entry translation table per (row of the cell, x % 12): the level a grey value
+    # takes at that position. Screen a whole page with strided slice assignments rather than a
+    # Python loop per pixel, which is the difference between seconds and minutes on a page.
+    translations = {}
+    for r in range(ROWS):
+        per_column = []
+        for c in range(COLS):
+            base = r * row_bytes + c // 4
+            shift = 6 - 2 * (c % 4)
+            per_column.append(bytes((table[g * size + base] >> shift) & 3 for g in range(256)))
+        translations[r] = per_column
+    data = open(raster_path, 'rb').read()
+    written = []
+    for page, off, header, payload in cupsraster.walk(data):
+        width, height = header['width'], header['height']
+        bpl = header['bytes_per_line']
+        aligned = (width + 127) & ~127
+        grey = data[off + cupsraster.PAGE_HEADER_LEN:off + cupsraster.PAGE_HEADER_LEN + payload]
+        path = os.path.join(out_dir, '%s-%d.pgm' % (stem, page + 1))
+        row = bytearray([3]) * aligned
+        groups = width // COLS
+        data_row = bytearray(width)
+        with open(path, 'wb') as f:
+            f.write(b'P5\n%d %d\n3\n' % (aligned, height))
+            for y in range(height):
+                src = grey[y * bpl:(y + 1) * bpl]
+                per_column = translations[(-y) % ROWS]
+                # Whole groups of COLS columns through the translation tables, and whatever
+                # does not fill a group one pixel at a time.
+                for c in range(min(COLS, width)):
+                    if groups:
+                        data_row[c:c + groups * COLS:COLS] = src[
+                            c:c + groups * COLS:COLS].translate(per_column[c])
+                for x in range(groups * COLS, width):
+                    data_row[x] = level_of(table, src[x], x, y)
+                row[:width] = data_row
+                f.write(row)
+                for x in range(width, aligned):
+                    row[x] = 3
+        written.append((path, aligned, height))
+    return written
+
+
+def synthetic_levels_table():
+    """A table whose levels spell (grey + row + column) % 4, so the row phase is visible."""
+    size, row_bytes = entry_size()
+    out = bytearray(size * 256)
+    for grey in range(256):
+        for r in range(ROWS):
+            for c in range(COLS):
+                level = (grey + r + c) % 4
+                out[grey * size + r * row_bytes + c // 4] |= level << (6 - 2 * (c % 4))
+    return bytes(out)
+
+
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('--binary', default=HP_BINARY, help='the HP filter to read (default: %s)'
@@ -142,6 +251,13 @@ def main(argv):
     ap.add_argument('--out', metavar='DIR', help='write one file per table, 12288 bytes each')
     ap.add_argument('--selftest', action='store_true',
                     help='check a synthetic table instead of the installed driver')
+    ap.add_argument('--convert', metavar='RASTER',
+                    help='screen a CUPS raster into two-bit pages (P5, maxval 3)')
+    ap.add_argument('--pages', metavar='DIR', default='.',
+                    help='where --convert writes its pages (default: the current directory)')
+    ap.add_argument('--table', choices=('400', '600'), default='400',
+                    help='tone table for --convert: the 400 dpi cell, which the PPD default '
+                         'resolution selects, or the 600 dpi one')
     args = ap.parse_args(argv)
 
     if args.selftest:
@@ -154,6 +270,27 @@ def main(argv):
                 raise SystemExit('selftest: grey 128 should be mid-level, not %d'
                                  % cells[128][0][0])
             print('   grey 128 maps to level %d at cell 0,0' % cells[128][0][0])
+            levels = synthetic_levels_table()
+            # The row phase counts down: same phase twelve lines later, a different one just
+            # below. Everything else in the rule follows from that and the column arithmetic.
+            assert level_of(levels, 10, 3, 4) == (10 + (-4) % ROWS + 3) % 4
+            assert level_of(levels, 10, 3, 16) == level_of(levels, 10, 3, 4)
+            assert level_of(levels, 10, 3, 5) != level_of(levels, 10, 3, 4)
+            assert level_of(levels, 10, 15, 4) == level_of(levels, 10, 3, 4)
+            samples = [[0, 64, 128, 192, 255, 255], [255, 192, 128, 64, 0, 0]]
+            raster = tiny_raster(os.path.join(work, 'tiny.raster'), 6, len(samples), samples)
+            page, width, height = convert(raster, levels, work, stem='tiny')[0]
+            blob = open(page, 'rb').read()
+            assert blob.startswith(b'P5\n128 2\n3\n'), blob[:16]
+            pixels = blob[blob.index(b'3\n') + 2:]
+            assert len(pixels) == 128 * 2
+            # The fast path and the one-pixel-at-a-time rule have to agree everywhere.
+            for y, line in enumerate(samples):
+                for x, grey in enumerate(line):
+                    assert pixels[y * width + x] == level_of(levels, grey, x, y), (x, y)
+            assert pixels[127] == 3, 'the aligned padding should be the lightest level'
+            print('   a 6x2 page screens to a %dx%d two-bit page, padding included'
+                  % (width, height))
         finally:
             shutil.rmtree(work, ignore_errors=True)
         print('selftest passed')
@@ -192,6 +329,13 @@ def main(argv):
             with open(path, 'wb') as f:
                 f.write(data[offsets[name]:offsets[name] + size * 256])
             print('   wrote %s (%d bytes)' % (path, size * 256))
+    if args.convert:
+        name = '_sdtahs10' if args.table == '400' else '_sdtahr10'
+        size = entry_size()[0]
+        table = data[offsets[name]:offsets[name] + size * 256]
+        for path, width, height in convert(args.convert, table, args.pages):
+            print('   wrote %s (%dx%d, %d grey levels)'
+                  % (path, width, height, 4))
     return 0
 
 
