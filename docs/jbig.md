@@ -83,10 +83,11 @@ also sets `JBG_DELAY_AT`, but that is a library switch that never reaches the he
 is why the options byte is masked with 0x7f.
 
 `MX = 0` is the significant simplification: the adaptive template pixel never moves, so
-none of the ATMOVE machinery is needed. HP's constructor seeds that field with 16 and lets
-the pipeline override it from `atmove` / `minAtMove` / `maxAtMove` properties, so HP's own
-stream may use a moving template; the reference driver explicitly forces `MX = 0` for this
-model family and is the configuration we match. See `docs/differences.md` item 2.
+none of the ATMOVE machinery is needed. That is HP's configuration too, not only the
+reference driver's: `zjs::JbigBandWriter::start` configures HP's encoder with `mx` taken
+from its `atmove` field, which is 0 for every job its own driver produces, and
+`setTemplate` only switches the options byte's `LRLTWO` bit. `docs/differences.md` item 2
+has the reading, and the one detail left open.
 
 ## What each option bit does here
 

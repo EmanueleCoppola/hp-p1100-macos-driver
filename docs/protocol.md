@@ -255,17 +255,26 @@ keeps its symbols, so `nm` and `otool -tvV` name what they are. **CONFIRMED**:
   `_jbg_resred`. The same library is what `scripts/jbig-oracle.sh` fetches, which is what
   makes it a fair reference for our own encoder; `docs/research.md` covers the licensing
   side of that fact.
-- `jbig::ZjbigEncoder`'s constructor writes the BIH defaults directly:
-  `movb $0x5c, 0x93(%rbx)`, `movb $0x3, 0x92(%rbx)`, `movb $0x10, 0x90(%rbx)`. Offsets 0x90
-  to 0x93 are the four bytes `getBIH` writes into BIH bytes 16..19 in order, so HP's
-  defaults are `MX = 16`, `MY = 0`, `order = 3`, `options = 0x5c`.
-- `zjs::JbigBandWriter::start` then reads the properties `atmove`, `minAtMove` and
-  `maxAtMove` off its `zeno::TagArg`, which is where the adaptive template from the
-  constructor can be overridden. That is also the source of the property names this
-  document already listed as LIKELY.
+- `jbig::ZjbigEncoder`'s constructor seeds its configuration: `movb $0x5c, 0x93(%rbx)`
+  (options), `movb $0x3, 0x92(%rbx)` (order), `movb $0x10, 0x90(%rbx)` (a byte next to
+  them), and `zjs::JbigBandWriter`'s constructor initialises the `atmove` field at 0xc4 to
+  0. `getBIH` assembles the 20-byte BIH from a separate block - the MX, MY, order and
+  options bytes at 0x80..0x83 of the object it is called on, plus a four-byte field at 0x84
+  - so the constructor's seeds and the BIH's bytes are not the same fields, and which of
+  them reaches the header is not visible from the constructor alone.
+- What the *encoder* is configured with is visible, though, and it is what produces the
+  stream: `zjs::JbigBandWriter::start` reads `atmove`, `minAtMove` and `maxAtMove` off its
+  `zeno::TagArg` with defaults of 0 and passes them, together with `getOrderBits()`,
+  `getOptionBits()`, `getStripeSize()` and a constant 0, to HP's version of jbigkit's
+  `jbg_enc_options(s, order, options, l0, mx, my)`. The parameter order and clamps are the
+  same as the reference library's (`mx` is stored only when it is at most 127, `my` only
+  when at most 255), and the `mx` it receives is `atmove` - 0 for every job HP's own
+  driver produces, because nothing in it ever supplies those keys. `setTemplate` only
+  toggles the options byte's `LRLTWO` bit, so it cannot move the template either.
 
-The one thing this does not settle is whether the running driver leaves `MX` at 16 or
-overrides it to 0; `docs/differences.md` item 2 records what we emit and why.
+So HP's encoder does not move the adaptive template, and neither does ours:
+`docs/differences.md` item 2 records the evidence and the one detail that stays open (which
+field the BIH's MX byte is taken from, 16 or 0, which decodes either way).
 
 ## Record format, cross-checked against the reference driver
 

@@ -273,9 +273,9 @@ Not verified:
 - Anything requiring the printer: USB identity, endpoint layout, whether the framing and
   the uncompressed image are accepted, whether duplex needs host-side page handling, and
   whether a power cycle needs a firmware download.
-- The media type codes for anything but plain paper, and whether HP's adaptive template
-  settings (as opposed to the reference driver's, which we match) matter to the decoder.
-  Both are in `docs/differences.md` with what settles them.
+- Whether the printer acts on the media type codes other than plain paper, and whether it
+  accepts the JBIG configuration (which is HP's own, item 2, as well as the reference
+  driver's). Both are in `docs/differences.md` with what settles them.
 
 ## Blockers that need the user
 
