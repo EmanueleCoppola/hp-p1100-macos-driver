@@ -266,7 +266,7 @@ The request had eleven phases. Where each one landed, and what its evidence is:
 | 8. golden-master comparison | `scripts/reference-compare.py` | done in the only form available: 31 cases against the reference driver, since HP's binary cannot run on this Mac |
 | 9. real printer testing | `scripts/make-test-job.py`, `docs/testing.md` | **blocked**: needs the printer attached, and the first test needs no build, no install and no administrator |
 | 10. native ARM64 verification | `scripts/verify-native.sh` | done for the binaries and the chain; the print-time process check needs a print |
-| 11. installation | `scripts/install.sh`, `scripts/uninstall.sh` | done, with a dry run that checks the PPD it would install - the diff against HP's, CUPS's own conformance test, and `scripts/ppd-compare.py`, which drives cupsfilter with that PPD and requires the same raster as HP's byte for byte; a real install needs `sudo` |
+| 11. installation | `scripts/install.sh`, `scripts/uninstall.sh` | done, with a dry run that checks the PPD it would install - the diff against HP's, CUPS's own conformance test, and `scripts/ppd-compare.py`, which drives cupsfilter with that PPD and requires the same raster as HP's byte for byte - and `scripts/rehearse-install.sh`, which executes every step except lpadmin into a scratch directory; the sudo install itself is what remains |
 
 Phase 9 is the one that is blocked outright, and it needs the printer. Phases 5, 10 and 11 each
 have a part that only a print or a `sudo` install can complete. Nothing else is deferred, and
@@ -301,6 +301,14 @@ Verified by execution, on real captured data where it matters:
   built-in conversion rules - 100 dpi, one bit per pixel, 119,500 bytes for the test page,
   against 31,361,800 for the real thing - instead of refusing, so a queue installed from it
   would have printed the fallback page rather than reporting a problem.
+- **The install and the uninstall, executed.** `scripts/rehearse-install.sh` runs install.sh
+  with `--dest` in a scratch directory and `--no-queue`, so the copies and their modes, the two
+  tone tables read out of HP's driver, the PPD written into the destination and the checks on it,
+  and then the uninstall that removes the lot, all happen for real. Twenty-three assertions, which
+  include that nothing was created at the system destination or in the print system, and the
+  refusals around a recursive delete: an HP location, an Apple location, `/etc/cups`, `/`, a
+  relative path, an empty one, and the system destination without root. What this does not reach
+  is `lpadmin` and the strict cupstestppd run, and both need root.
 - The PPD option mapping, tested against the real value names from the installed PPD:
   `Duplex=DuplexNoTumble`/`DuplexTumble`/`None` and the IPP `sides=` spellings of the same
   choices, `InputSlot=Manual` to the tray code, `pjlDensity` clamped to the 1..5 the PPD

@@ -164,6 +164,14 @@ Options:
                                                      (default HP_LaserJet_Professional_P1102)
     --device URI        use this device URI instead of reading it from the source queue
     --force             replace an existing queue of the same name
+    --dest DIR          where to install         (default /Library/Printers/p1102)
+    --no-queue          install the files and stop; no lpadmin, and no root needed
+
+With `--dest` and `--no-queue` the whole install runs without privileges into a directory of
+your choosing, which is how `scripts/rehearse-install.sh` tries it out and takes it away again:
+the copies, the tone tables read out of HP's driver, the PPD and the checks on it, and then
+`uninstall.sh --dest` removing the lot. What that cannot reach is the strict cupstestppd run,
+whose file checks want root-owned files; see docs/testing.md.
 
 The installer stops if the filter binary is missing, or if file(1) does not report it as
 an ARM64 binary. It also refuses outright to install into any Apple or HP directory, as a
@@ -176,6 +184,10 @@ guard against a mistyped path.
 
 That deletes the queue and removes /Library/Printers/p1102. HP's queue, files and receipts
 are left alone.
+
+`uninstall.sh` takes the same `--dest` as the installer, and refuses to delete a path that is
+not absolute, is empty, is `/`, or is inside Apple's or HP's trees. It also refuses the system
+destination without root, the same way the installer does.
 
 ## Verifying an install
 

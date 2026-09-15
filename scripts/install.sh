@@ -8,7 +8,9 @@
 #   - Everything we add lives under /Library/Printers/p1102, one directory to delete.
 #   - No SIP change, no system extension, no kernel extension, nothing disabled.
 #
-# `--dry-run` prints every command without running it and needs no privileges.
+# `--dry-run` prints every command without running it and needs no privileges, and
+# `--dest DIR --no-queue` runs every step except the queue into a scratch directory, which is
+# how scripts/rehearse-install.sh exercises this script without root.
 
 set -eu
 
@@ -31,12 +33,13 @@ fi
 PYTHON=${PYTHON:-python3}
 DRY=0
 FORCE=0
+NOQUEUE=0
 DEVICE=
 
 usage() {
     cat <<EOF
 usage: $0 [--dry-run] [--force] [--queue NAME] [--source-queue NAME] [--device URI]
-             [--icon FILE.icns]
+             [--icon FILE.icns] [--dest DIR] [--no-queue]
 
   --dry-run          print the commands instead of running them (no privileges needed)
   --force            replace an existing queue of the same name
@@ -44,6 +47,8 @@ usage: $0 [--dry-run] [--force] [--queue NAME] [--source-queue NAME] [--device U
   --source-queue N   HP queue to inherit the device URI and PPD from (default $SOURCE_QUEUE)
   --device URI       use this device URI instead of reading it from the source queue
   --icon FILE        printer icon to install and point the PPD at (default $ICON)
+  --dest DIR         where to install            (default $DEST)
+  --no-queue         install the files and stop; no lpadmin, no root needed
 EOF
 }
 
@@ -55,6 +60,8 @@ while [ $# -gt 0 ]; do
         --source-queue) SOURCE_QUEUE=$2; shift ;;
         --device) DEVICE=$2; shift ;;
         --icon) ICON=$2; shift ;;
+        --dest) DEST=$2; shift ;;
+        --no-queue) NOQUEUE=1 ;;
         -h|--help) usage; exit 0 ;;
         *) echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
     esac
@@ -162,14 +169,14 @@ check_ppd() {
         die "the generated PPD changes lines it should not (above)"
     fi
 
-    # CUPS's own conformance test. Its two file checks cannot pass before the install, and what
-    # they want is ownership rather than a mode: a copy of the filter at the mode this script
-    # installs (0755) in a temporary directory fails them, while HP's own root-owned files pass.
-    # So a dry run turns them off with the documented -I flags there and only there, and a real
-    # run reaches this point with root-owned copies under $DEST and is judged strictly.
-    # Everything else - the option UI, the translations - is judged in both.
+    # CUPS's own conformance test. Its two file checks want ownership rather than a mode: a copy
+    # of the filter at the mode this script installs (0755) in a temporary directory fails them,
+    # while HP's own root-owned files pass. Only a run that has just installed root-owned copies
+    # into /Library/Printers can satisfy them, so a dry run and a rehearsal into a scratch
+    # directory turn them off with the documented -I flags, and the install that matters is
+    # judged strictly. Everything else - the option UI, the translations - is judged in both.
     if [ -x /usr/bin/cupstestppd ]; then
-        if [ "$DRY" = 1 ]; then
+        if [ "$DRY" = 1 ] || [ "$SYSTEM" = 0 ]; then
             report=$(/usr/bin/cupstestppd -I filters -I profiles "$ppd" 2>&1 || true)
         else
             report=$(/usr/bin/cupstestppd "$ppd" 2>&1 || true)
@@ -194,8 +201,16 @@ case "$DEST" in
 esac
 [ -n "$QUEUE" ] || die "empty queue name"
 
-if [ "$DRY" = 0 ] && [ "$(id -u)" -ne 0 ]; then
-    die "writing to $DEST and creating a queue need root; re-run with sudo"
+# Root is what writing under /Library/Printers costs, not what this script costs. --dest points
+# it at a scratch directory instead, which is how scripts/rehearse-install.sh runs every step
+# below except the queue without privileges and without going near anything Apple or HP owns.
+SYSTEM=0
+case "$DEST" in
+    /Library/Printers/*) SYSTEM=1 ;;
+esac
+if [ "$DRY" = 0 ] && [ "$SYSTEM" = 1 ] && [ "$(id -u)" -ne 0 ]; then
+    die "writing to $DEST and creating a queue need root; re-run with sudo
+  (or rehearse the same steps in a scratch directory: --dest DIR --no-queue)"
 fi
 
 # --- check what we are installing -------------------------------------------
@@ -263,8 +278,14 @@ fi
 echo
 echo "1. installing the filter, the icon and the PPD into $DEST"
 run mkdir -p "$DEST"
-run /usr/bin/install -m 0755 -o root -g wheel "$FILTER" "$DEST/p1102-filter"
-run /usr/bin/install -m 0644 -o root -g wheel "$ICON" "$DEST/p1102.icns"
+# Ownership belongs to the system location. A rehearsal into a scratch directory cannot set it -
+# install(1) refuses - and does not need to, since nothing there is read by the print system.
+OWNER=
+if [ "$SYSTEM" = 1 ]; then
+    OWNER="-o root -g wheel"
+fi
+run /usr/bin/install -m 0755 $OWNER "$FILTER" "$DEST/p1102-filter"
+run /usr/bin/install -m 0644 $OWNER "$ICON" "$DEST/p1102.icns"
 # The two tone tables the two-bit grey screening uses. They are HP data, so the installer
 # reads them out of the HP driver on this machine rather than carrying them here. A machine
 # without that driver still gets a working queue: only p1102Grey=Screened2 would fail, and
@@ -273,10 +294,8 @@ if [ "$PYTHON_OK" = 1 ] && [ -f "$REPO/scripts/hp-tone-table.py" ]; then
     tones_tmp=$(mktemp -d -t p1102-tones) || die "cannot create a temporary directory"
     if "$PYTHON" "$REPO/scripts/hp-tone-table.py" --out "$tones_tmp" >/dev/null 2>&1 \
         && [ -s "$tones_tmp/sdtahs10.bin" ] && [ -s "$tones_tmp/sdtahr10.bin" ]; then
-        run /usr/bin/install -m 0644 -o root -g wheel "$tones_tmp/sdtahs10.bin" \
-            "$DEST/p1102-400.tones"
-        run /usr/bin/install -m 0644 -o root -g wheel "$tones_tmp/sdtahr10.bin" \
-            "$DEST/p1102-600.tones"
+        run /usr/bin/install -m 0644 $OWNER "$tones_tmp/sdtahs10.bin" "$DEST/p1102-400.tones"
+        run /usr/bin/install -m 0644 $OWNER "$tones_tmp/sdtahr10.bin" "$DEST/p1102-600.tones"
     else
         echo "note: no HP driver to read the tone tables from, so this queue will not offer"
         echo "      the two-bit grey screening. Everything else is unaffected."
@@ -311,18 +330,26 @@ else
 fi
 
 echo
-echo "2. creating the queue '$QUEUE'"
-if [ "$FORCE" = 1 ]; then
-    run lpadmin -x "$QUEUE" 2>/dev/null || true
+if [ "$NOQUEUE" = 1 ]; then
+    echo "2. no queue: --no-queue was given, so the files are in place and nothing points at them"
+else
+    echo "2. creating the queue '$QUEUE'"
+    if [ "$FORCE" = 1 ]; then
+        run lpadmin -x "$QUEUE" 2>/dev/null || true
+    fi
+    run lpadmin -p "$QUEUE" -E -v "$DEVICE" -P "$DEST/p1102.ppd"
+    run lpadmin -p "$QUEUE" -o printer-is-shared=false
+    run cupsenable "$QUEUE"
+    run cupsaccept "$QUEUE"
 fi
-run lpadmin -p "$QUEUE" -E -v "$DEVICE" -P "$DEST/p1102.ppd"
-run lpadmin -p "$QUEUE" -o printer-is-shared=false
-run cupsenable "$QUEUE"
-run cupsaccept "$QUEUE"
 
 echo
 echo "done. the HP installation under /Library/Printers/hp was not touched."
 echo
+if [ "$NOQUEUE" = 1 ]; then
+    echo "remove the files again with: $REPO/scripts/uninstall.sh --dest $DEST"
+    exit 0
+fi
 echo "the queue's icon shows up next to its name in System Settings and in the print dialog."
 echo "if the row still shows the old picture, the print system has it cached:"
 echo "    sudo launchctl kickstart -k system/org.cups.cupsd"

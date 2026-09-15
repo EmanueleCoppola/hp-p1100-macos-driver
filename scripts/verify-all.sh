@@ -85,6 +85,7 @@ run 'peak memory does not grow with the job' "$PY" scripts/memory-check.py
 # that never ran.
 run 'PPD the installer would write' env PYTHON="$PY" ./scripts/install.sh --dry-run
 run 'PPD the installer writes, through CUPS' "$PY" scripts/ppd-compare.py
+run 'install and uninstall, in a scratch directory' ./scripts/rehearse-install.sh
 run 'uninstall, dry run' ./scripts/uninstall.sh --dry-run
 echo
 echo 'the scripts themselves:'

@@ -178,6 +178,7 @@ the CUPS boundary, and the shape of the install:
   peak memory does not grow with the job   ok
   PPD the installer would write            ok
   PPD the installer writes, through CUPS   ok
+  install and uninstall, in a scratch directory ok
   uninstall, dry run                       ok
 
 the scripts themselves:
@@ -675,6 +676,29 @@ filter at 0755 in a temporary directory fails them, HP's own root-owned pair pas
 what `install -o root -g wheel` provides. That test is also what requires the option we add to
 carry a label in every language the PPD declares: thirteen of them, so the generator writes
 thirty-nine translation lines rather than three.
+
+## The install and the uninstall, executed
+
+`scripts/rehearse-install.sh` runs install.sh with `--dest` pointed at a scratch directory and
+`--no-queue`, so every step except lpadmin happens for real: the copies and their modes, the two
+tone tables read out of HP's driver, the PPD written into the destination, the checks run on it,
+and then uninstall.sh taking the lot away again. It checks what landed - five files, the filter
+and the icon byte-identical to the build, both tone tables at their 12288 bytes, and the PPD's
+filter and icon paths inside the destination - what did not happen (`/Library/Printers/p1102`
+not created, the HP queue's device unchanged, no queue created) and that nothing is left behind.
+
+It also runs the refusals, because the uninstall ends in a recursive delete of a path taken from
+the command line: an HP location, an Apple location, `/etc/cups`, `/`, a relative path, an empty
+one, and the system destination without root. Each has to be refused, and each is.
+
+What it found the first time it ran, which is the argument for having it: install.sh forced
+`-o root -g wheel` on every copy, so its file steps could only ever run as root, and there was no
+way to try them first. Ownership is now set only when the destination is under /Library/Printers.
+
+The one step it cannot reach is the strict cupstestppd run, whose two file checks want root-owned
+files. That waits for the install that needs sudo. The evidence it will pass is the same check run
+against root-owned stand-ins at the modes this installer uses: HP's own filter and icon, with
+`/usr/bin/true` in the filter's place, pass it.
 
 ## Golden-master comparison: what was intended, and what was done
 
