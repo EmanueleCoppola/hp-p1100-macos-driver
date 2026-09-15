@@ -341,6 +341,7 @@ What each result tells you:
 | `--raw` prints but JBIG does not | the printer dislikes our compressed stream specifically; it is byte-identical to the reference encoder, so this would point at a printer-side constraint such as the option set, not at the coder |
 | it prints but the image is inverted | the ink polarity is the wrong way round; `1` is currently ink, following the reference implementation's plane convention |
 | it prints the wrong size or is sheared | the geometry or the row stride is wrong, which the `RASTER_X` versus aligned-width distinction in `docs/protocol.md` explains |
+| a two-sided job prints single-sided, in document order, with no prompt | duplex needs the host-side page handling the other two drivers have; see item 5 of `docs/differences.md`, which also says what to try |
 
 `scripts/make-test-job.py` compresses with the **reference** encoder by default. That is
 deliberate: if a page fails to print, a reference-quality payload has already ruled out our
