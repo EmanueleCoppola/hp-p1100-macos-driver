@@ -33,6 +33,15 @@ That is the comparison Phase 8 of the plan asked for, in the only form this mach
 not against HP's binary, which cannot run, but against the other implementation that is
 known to drive this printer family. What it does not cover is listed at the end.
 
+One scope limit belongs here rather than only in item 11: the page the reference receives is
+**1-bit**. `scripts/reference-compare.py` derives it by thresholding the CUPS raster at the
+same cut our filter uses, so what the two jobs share is the page bitmap as *this harness*
+defines it - which means the comparison covers the job encoding (the item sets, the chunk
+framing, the geometry, the JBIG image) and not the 8 bits per pixel to 1 bit conversion. A
+fixture with grey in it would silently compare our thresholding against itself, so the script
+now refuses to run one. The grey path is item 11, and what settles it is an observation rather
+than this comparison.
+
 ## 1. The PJL wrapper follows the reference, not HP. CONFIRMED difference, low risk
 
 HP's filter emits `@PJL JOB NAME=...`, `@PJL ENTER LANGUAGE=...` and `@PJL EOJ`. We emit the
@@ -316,24 +325,46 @@ the PPD's defaults for those, which is where the interface says a raster filter 
 
 CUPS hands the filter 8 bits per pixel of grey - the PPD asks for exactly that
 (`cupsBitsPerColor 8`, `cupsColorSpace 0`) - and something has to turn it into the printer's one
-bit. HP's filter does it with a screen: its symbols include `ProcessMonoOneBit`,
-`ProcessMonoTwoBit`, `_ScreenPixelsOneBit` and `_ScreenPixelsTwoBit`, and the one-bit path walks
-the pixels comparing each against a threshold table, packing the result with a shifting bit
-mask. We compare against a fixed threshold of 128 instead, which is what `crates/p1102-raster`
-has done since the first commit.
+bit. We compare against a fixed threshold of 128, which is what `crates/p1102-raster` has done
+since the first commit. HP screens instead, and the mechanism is now read out of its binary
+rather than guessed at:
+
+- `ZjsMonoFormatter::startPage` calls `selectScreenTable(getModelName(), vdpi,
+  bits_per_pixel, &table, &rows, &cols)` once per page, then `ProcessMonoOneBit` or
+  `ProcessMonoTwoBit` according to the bits per pixel, and those call `_ScreenPixelsOneBit`
+  or `_ScreenPixelsTwoBit`.
+- The selector is straight-line string comparison on the model name. `"HP LaserJet
+  Professional P1560"` and `"HP LaserJet Professional P1600dn"` get `_sdtahx00` (16x16) at
+  one bit per pixel and `_sdtahx10` (12x12) at two. Every other model name - which is this
+  PPD's case, `*ModelName: "HP LaserJet Professional P1100"` - gets `_sdtahs10` (12x12)
+  when the raster's vertical resolution is 400 dpi, and `_sdtahr10` (12x12) for anything else,
+  which is what this printer produces: its PPD sets `HWResolution[600 600]` for *both* of its
+  `Resolutions` choices.
+- The comparison is `ink where ~pixel >= table[column]`, with pure white short-circuited to
+  white, the column index advancing one byte per pixel and wrapping at `rows`, and the table
+  pre-advanced by the caller from the line count.
+- `_sdtahx00` **is** a threshold matrix: 16x16 bytes spread over 0..253. The 12x12 ones are
+  not. `_sdtahr10` starts with 48 zero bytes and continues in 24-byte records
+  (`01 00 10 00 ... c`, `c` in the low thousands), it is initialized data in `__data`, and
+  nothing in the file's `__text` writes it. Its neighbours `_black600x1Screen` and
+  `_black600x2Screen` are 16x16 dispersed matrices as well, and nothing references them either.
+
+So the mechanism is settled and the table that *this* printer's model name selects is not yet
+reproduced. Read as bytes it would ink every non-white pixel, which cannot be what the working
+driver does, so something else is going on: an initializer, a relocation, or a second selector
+that resolves this family. That is where a continuation should start. An earlier version of
+this entry said the table "is built inside the filter and the path to it did not resolve";
+that is wrong in its first half - the tables are static data with symbols on them - and the
+selector and the loop above are what replaced it.
+
+Substituting a screen of our own would be a guess with the same standing as the threshold, so
+the threshold stays until the real table is identified.
 
 What it changes, and what it does not: the protocol is untouched - the page is a bitmap either
 way - but the *appearance* of anything with grey in it is not. Antialiased text gets harder
 edges from us, and a photograph or a gradient gets a hard edge where HP would print a pattern
-of dots.
-
-HP's screen is not reproduced, for a reason worth stating rather than hiding: the matrix is not
-readable statically. `ProcessMonoOneBit` takes it as its `unsigned char*` argument and `main`
-passes a null there, and the caller is the whole of `main`: there is no PPD attribute for it
-either (the PPD has no screen or halftone keyword, only `*DefaultColorSpace: Gray`), so the
-table it falls back to is built inside the filter and the path to it did not resolve in the
-time this was worth. Reproducing HP's halftone needs that table; substituting a screen of our
-own would be a guess with the same standing as the threshold, so the simpler behaviour stayed.
+of dots. The byte-identity comparison against the reference driver does not cover this at all,
+because both sides of it see a thresholded page (see "How this list is measured now").
 
 One observation settles whether it matters: print a graded fill or antialiased text, and compare
 it with the same page through HP's queue while that still runs. If ours looks worse in a way

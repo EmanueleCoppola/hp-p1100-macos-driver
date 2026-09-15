@@ -615,6 +615,9 @@ locally: `scripts/foo2zjs-oracle.sh` builds the open driver that supports this p
 `scripts/reference-compare.py` compares whole jobs against it, byte for byte, over a set of
 real option combinations. That is the comparison described under "The reference driver, as a
 runnable golden master" above, and it is what `docs/differences.md` now reports against.
+The page both sides see there is 1-bit: the harness derives it by thresholding the raster the
+way the filter does, so what is compared is the job encoding rather than the grey conversion
+(item 11 of that list, and the script now refuses a fixture with grey in it).
 
 For HP's own output specifically, the binary can still be *read* even though it cannot be
 run, which is how its BIH defaults and its complete PJL literal list were determined. Where
