@@ -85,8 +85,9 @@ back to its built-in conversion rules and produces a raster anyway - 100 dpi, on
 pixel, 119,500 bytes for the test page, where HP's own PPD produces the printer's 600 dpi grey
 at 31,361,800 bytes. The generated PPD was in exactly that state until it was measured.
 `scripts/ppd-compare.py` is the check: it drives cupsfilter with the PPD install.sh would
-write, for six option combinations that each move the raster in a different way, and requires
-the result to be byte-identical to HP's for the same document and options.
+write, generated from either PPD it can start from, for six option combinations that each move
+the raster in a different way, and requires the result to be byte-identical to the source
+PPD's for the same document and options.
 
 **CUPS's own conformance test is on this Mac.** `/usr/bin/cupstestppd` - an earlier version of
 this document said macOS ships no such thing, which is how the file above stayed malformed

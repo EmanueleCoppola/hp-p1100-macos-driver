@@ -644,14 +644,15 @@ The rehearsal above uses HP's PPD, because that is the PPD the printer's queue h
 file install.sh writes is a different object, and nothing in the rehearsal shows that CUPS can
 use it. `scripts/ppd-compare.py` is what does.
 
-It generates the PPD exactly as install.sh calls the generator, then puts the same document
-through cupsfilter twice for each case - once with HP's PPD, once with ours - and requires the
-CUPS raster to come out byte-identical. Six cases, each chosen because it moves the raster: the
-default Letter page, A4, Legal, A5, `Resolutions=600x600dpi` (which changes only the
-`cupsCompression` field, 401 to 1 - the marker this driver reads to choose its tone table) and
-`MediaType=Heavy111-130g` (which changes only the media type string in the header). A case that
-stops moving HP's own raster fails the script, so the list cannot quietly decay into six
-comparisons of nothing.
+It generates the PPD exactly as install.sh calls the generator - from both PPDs install.sh can
+start from, the queue's and, on a machine with no HP queue, the one Apple ships - then puts the
+same document through cupsfilter twice for each case, once with the source PPD and once with
+ours, and requires the CUPS raster to come out byte-identical. Six cases per source, twelve
+comparisons in all. Each case is chosen because it moves the raster: the default Letter page, A4,
+Legal, A5, `Resolutions=600x600dpi` (which changes only the `cupsCompression` field, 401 to 1 -
+the marker this driver reads to choose its tone table) and `MediaType=Heavy111-130g` (which
+changes only the media type string in the header). A case that stops moving the source's own
+raster fails the script, so the list cannot quietly decay into comparisons of nothing.
 
 What this establishes is the half of the boundary before the filter: everything the PPD says
 about the device - geometry, margins, resolution, compression, media - reaches the filter the
