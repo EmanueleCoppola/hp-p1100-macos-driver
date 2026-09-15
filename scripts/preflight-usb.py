@@ -40,6 +40,7 @@ import io
 import json
 import os
 import plistlib
+import shlex
 import subprocess
 import sys
 import urllib.parse
@@ -139,6 +140,39 @@ def is_printer(dev):
             or dev['vid'] == HP_VENDOR_ID)
 
 
+def backend_devices(source=None, timeout=5):
+    """What CUPS's own usb backend lists, without privileges.
+
+    The backend is what a job is handed to, and with no arguments it lists the devices it can
+    reach - the same list `lpinfo -v` shows. That answer is what decides whether a queue
+    pointing at a `usb://` URI can print at all, so the report compares it with both the
+    registry and the queue. `source` is a saved listing, for tests.
+    """
+    backend = '/usr/libexec/cups/backend/usb'
+    if source is not None:
+        text = source.decode('utf-8', 'replace')
+    else:
+        if not os.path.exists(backend):
+            return None
+        try:
+            proc = subprocess.run([backend], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                  timeout=timeout)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        text = proc.stdout.decode('utf-8', 'replace')
+    found = []
+    for line in text.splitlines():
+        # device-class device-uri "make and model" "info" ["device-id" ["location"]]
+        try:
+            parts = shlex.split(line)
+        except ValueError:
+            continue
+        if len(parts) >= 4:
+            found.append({'class': parts[0], 'uri': parts[1], 'make_model': parts[2],
+                          'info': parts[3]})
+    return found
+
+
 def queue_names_device(queue, device):
     """Does this queue's device URI name this device?
 
@@ -216,7 +250,7 @@ def cups_queues():
     return queues
 
 
-def human(devices, queues, show_all):
+def human(devices, queues, show_all, backend=None):
     printers = [d for d in devices if is_printer(d)]
 
     print('P1102 pre-flight (read-only)')
@@ -228,6 +262,10 @@ def human(devices, queues, show_all):
         print('  %s' % q['queue'])
         print('    device   %s' % q['uri'])
         print('    wants    serial %s' % (q['serial'] or '(none in the URI)'))
+        if backend is not None:
+            listed = [d for d in backend if d['uri'] == q['uri']]
+            print('    backend  %s' % ('the usb backend lists this device' if listed else
+                                      'the usb backend does not list it'))
         print('    ppd      %s%s' % (q['ppd'], ' (missing)' if q.get('ppd_missing') else ''))
         if q['device_ids']:
             print('    id       1284DeviceID of the PPD (%d models):' % len(q['device_ids']))
@@ -240,6 +278,16 @@ def human(devices, queues, show_all):
             elif arch and 'arm64' not in arch:
                 note = '  <- Intel-only, cannot run here'
             print('    filter   %-8s %s%s' % (arch or '?', path, note))
+    print()
+
+    print('CUPS\'s usb backend lists:')
+    if backend is None:
+        print('  (no /usr/libexec/cups/backend/usb on this machine)')
+    elif not backend:
+        print('  nothing')
+    else:
+        for d in backend:
+            print('  %s  %s  %s' % (d['class'], d['uri'], d['make_model']))
     print()
 
     print('USB devices: %d attached' % len(devices))
@@ -427,6 +475,21 @@ def selftest():
     assert 'no USB Printer-class device' in report, report
     checks += 2
 
+    # CUPS's own view of the devices, which the report compares with the registry: a queue
+    # can only print if the backend it hands bytes to lists the device its URI names.
+    listing = (b'direct usb://Hewlett-Packard/HP%20LaserJet%20Professional%20P1102?serial=X'
+               b' "HP LaserJet Professional P1102" "HP LaserJet Professional P1102"'
+               b' "MFG:Hewlett-Packard;MDL:HP LaserJet Professional P1102;CMD:ZJS,PJL;CLS:PRINTER;"\n'
+               b'direct usb://Samsung/C48x%20Series?serial=Y "Samsung C48x Series" "Samsung"\n')
+    listed = backend_devices(source=listing)
+    assert len(listed) == 2, listed
+    assert listed[0]['make_model'] == 'HP LaserJet Professional P1102', listed[0]
+    checks += 2
+    if queues:
+        report = capture(human, devices, queues, False, listed)
+        assert 'the usb backend' in report, report
+        checks += 1
+
     print('preflight self-test: %d checks passed' % checks)
     return 0
 
@@ -456,16 +519,19 @@ def main(argv):
     reported = report_from_dump(source) if source is not None else None
     if reported is not None:
         devices, queues = reported['devices'], reported.get('queues', [])
+        backend = reported.get('backend_devices')
     else:
         devices = usb_devices(source)
         queues = cups_queues()
+        backend = backend_devices()
     printers = [d for d in devices if is_printer(d)]
 
     if args.json:
         print(json.dumps({'printers_attached': len(printers), 'devices': devices,
-                          'queues': queues}, indent=2, sort_keys=True))
+                          'queues': queues, 'backend_devices': backend},
+                         indent=2, sort_keys=True))
     else:
-        human(devices, queues, args.all)
+        human(devices, queues, args.all, backend)
     return 0 if printers else 1
 
 

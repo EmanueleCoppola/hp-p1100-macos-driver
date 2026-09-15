@@ -160,6 +160,13 @@ does the queue show a reason (an empty tray, a jam) when the printer is in that 
 does, Apple's usb backend is reporting them and this gap costs nothing; if it does not, adding
 a backchannel read to the filter is the work.
 
+Part of the answer is already visible: Apple's `usb` backend reports state itself. Run it by
+hand with no printer attached and it says `STATE: +offline-report` and `INFO: The printer is
+offline.`, which is where connectivity reasons come from. What it cannot know without asking
+the device is the paper and toner conditions, which is precisely what HP reads the backchannel
+for - so the open question is narrower than it first looks: **do paper and toner reasons appear
+on this queue?**
+
 ## 5. Duplex items are emitted; both known drivers also have host-side page handling. UNKNOWN
 
 The PPD offers Duplex None / DuplexNoTumble / DuplexTumble, and CUPS describes this printer

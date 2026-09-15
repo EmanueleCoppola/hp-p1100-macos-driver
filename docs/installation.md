@@ -133,6 +133,24 @@ so a failure does not only reach the log: CUPS uses that first word to set the q
 message, which `lpstat -p` then shows. A job that stops for no visible reason therefore has
 its reason in the queue's own state, not just in a log nobody opened.
 
+## Trying it without installing anything
+
+The first hardware test does not need this installer, or an administrator. A complete job can
+be produced without a compiler (`scripts/make-test-job.py`) and handed straight to Apple's own
+`usb` backend, which is world-executable and takes its device URI from the environment:
+
+```bash
+PY=/opt/homebrew/bin/python3.13
+$PY scripts/make-test-job.py --pattern square --page a4 -o /tmp/square.zjs --verify
+DEV=$(lpstat -v HP_LaserJet_Professional_P1102 | sed -n 's/^device for [^:]*: //p')
+DEVICE_URI="$DEV" /usr/libexec/cups/backend/usb 1 "$USER" bring-up 1 '' /tmp/square.zjs
+```
+
+That is the same transport the installed queue would use, so a page that prints settles the
+protocol, the framing and the USB path in one go - and it leaves nothing behind to undo. What
+it does not test is CUPS's chain from the PPD through the filter, which is what the raw queue
+in docs/testing.md and then this installer are for.
+
 ## Undoing a bad install by hand
 
 If a script fails halfway, this fully reverses it:
