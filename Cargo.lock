@@ -17,6 +17,7 @@ version = "0.1.0"
 dependencies = [
  "p1102-job",
  "p1102-protocol",
+ "p1102-raster",
 ]
 
 [[package]]
