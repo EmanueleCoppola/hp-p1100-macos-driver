@@ -479,6 +479,30 @@ pub enum DecodeError {
     ChunkSizeTooSmall(u32),
 }
 
+impl std::fmt::Display for DecodeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DecodeError::BadStreamSignature => {
+                write!(f, "not a ZjStream: it has to begin with the JZJZ signature")
+            }
+            DecodeError::Truncated => {
+                write!(f, "the stream ends in the middle of a chunk header")
+            }
+            DecodeError::BadChunkSignature(found) => write!(
+                f,
+                "chunk signature {found:#06x} where {:#06x} was expected",
+                CHUNK_SIGNATURE
+            ),
+            DecodeError::ChunkSizeTooSmall(size) => write!(
+                f,
+                "a chunk claims {size} bytes, less than its own {CHUNK_HEADER_LEN}-byte header"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for DecodeError {}
+
 /// Decode a complete ZjStream. Used by `p1102 zjs-dump` and by round-trip tests.
 pub fn decode(stream: &[u8]) -> Result<Vec<DecodedChunk>, DecodeError> {
     if stream.len() < 4 || &stream[..4] != STREAM_SIGNATURE {
@@ -968,6 +992,27 @@ mod tests {
         assert_eq!(decode(b"").unwrap_err(), DecodeError::BadStreamSignature);
     }
 
+    /// These are what `p1102 zjs-dump` prints when it is pointed at something that is not a
+    /// job - a CUPS raster, say - so the wording is part of the tool's interface.
+    #[test]
+    fn decode_errors_say_what_is_wrong() {
+        assert_eq!(
+            DecodeError::BadStreamSignature.to_string(),
+            "not a ZjStream: it has to begin with the JZJZ signature"
+        );
+        assert_eq!(
+            DecodeError::BadChunkSignature(0x1234).to_string(),
+            "chunk signature 0x1234 where 0x5a5a was expected"
+        );
+        assert_eq!(
+            DecodeError::Truncated.to_string(),
+            "the stream ends in the middle of a chunk header"
+        );
+        assert_eq!(
+            DecodeError::ChunkSizeTooSmall(4).to_string(),
+            "a chunk claims 4 bytes, less than its own 16-byte header"
+        );
+    }
     /// Byte-level golden vector for a full `START_PAGE`, written out explicitly from the
     /// format description rather than by reusing the encoder's own helpers. This is the
     /// test that would catch a systematic mistake shared by the encoder and the decoder.

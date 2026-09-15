@@ -483,6 +483,10 @@ same job from each, which is what would catch a dependence on the input being se
 option strings come from the printer's real PPD, so the remaining untested piece is narrow:
 whether cupsd reaches the filter at all with our PPD, which the first real print answers.
 
+Run the filter by hand and it tells you this: `--help` prints the calling convention, and a
+short argument list prints it on stderr and exits 2 without writing a job. Before that guard,
+a mistyped invocation wrote half a job to stdout and then complained about the raster.
+
 
 
 
