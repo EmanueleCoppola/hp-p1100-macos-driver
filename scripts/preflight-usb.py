@@ -34,7 +34,9 @@ registry failure. The serial comparison is reported, not returned.
 """
 
 import argparse
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import plistlib
@@ -66,18 +68,24 @@ def run(cmd):
             proc.stderr.decode('utf-8', 'replace'))
 
 
-def usb_devices():
+def usb_devices(source=None):
     """Every USB device, each with the interfaces that belong to it.
 
     Interfaces are siblings of their device in the registry, not children, so they are
     matched back by locationID, which both carry. Endpoints are not registry entries at
     all: only their count (bNumEndpoints) is exposed, which is why the report shows that
     rather than inventing addresses.
+
+    `source` is a saved `ioreg -a` dump, for reviewing a machine that is not this one;
+    without it the live registry is read.
     """
-    rc, out, err = run(['ioreg', '-r', '-c', 'IOUSBHostDevice', '-l', '-w0', '-a'])
-    if rc != 0 or not out.strip():
-        raise SystemExit('ioreg failed: %s' % (err.strip() or 'no output'))
-    tree = plistlib.loads(out.encode('utf-8'))
+    if source is not None:
+        tree = plistlib.loads(source)
+    else:
+        rc, out, err = run(['ioreg', '-r', '-c', 'IOUSBHostDevice', '-l', '-w0', '-a'])
+        if rc != 0 or not out.strip():
+            raise SystemExit('ioreg failed: %s' % (err.strip() or 'no output'))
+        tree = plistlib.loads(out.encode('utf-8'))
 
     devices = {}
     interfaces = {}
@@ -129,6 +137,19 @@ def is_printer(dev):
     return (dev['class'] == PRINTER_CLASS
             or any(i['class'] == PRINTER_CLASS for i in dev['interfaces'])
             or dev['vid'] == HP_VENDOR_ID)
+
+
+def queue_names_device(queue, device):
+    """Does this queue's device URI name this device?
+
+    The serial comparison would otherwise fire for every USB queue on the machine: a Samsung
+    or Epson queue's serial is always going to differ from an HP printer's, and reporting that
+    as a mismatch is noise at exactly the moment someone is reading the report to decide what
+    to do next.
+    """
+    uri = urllib.parse.unquote(queue['uri']).lower()
+    product = ' '.join((device['name'] or '').lower().split())
+    return bool(product) and product in uri
 
 
 def arch_of(path):
@@ -268,6 +289,8 @@ def human(devices, queues, show_all):
             if i['endpoints'] is not None and i['endpoints'] < 2:
                 print('    fewer than two bulk endpoints: the backchannel will not work')
         for q in queues:
+            if not queue_names_device(q, d):
+                continue
             if q['serial'] and d['serial']:
                 same = q['serial'] == d['serial']
                 print('  queue %s asks for serial %s: %s' % (
@@ -277,9 +300,135 @@ def human(devices, queues, show_all):
                           ' the usb backend will not find it')
             elif q['serial'] and not d['serial']:
                 print('  queue %s asks for a serial, the device reports none' % q['queue'])
+        if queues and not any(queue_names_device(q, d) for q in queues):
+            print('  no queue on this machine names this device, so none of them can print to'
+                  ' it as configured')
     print()
     print('  if the device re-enumerated, its entry id above differs from the previous')
     print('  report; diff two --json runs to see exactly what changed.')
+
+
+def synthetic_registry(product='HP LaserJet Professional P1102', serial=None,
+                       vendor_id=HP_VENDOR_ID, product_id=0x3D17, printer_interface=True):
+    """A registry shaped the way `ioreg -a` returns one, for use without a printer.
+
+    Only the fields the report reads are here, and the layout is the part that matters:
+    interfaces are *siblings* of their device rather than children, and both carry the
+    locationID that ties them together.
+    """
+    location = 0x1420000
+    device = {
+        'IORegistryEntryID': 4294967296,
+        'IORegistryEntryName': product,
+        'USB Product Name': product,
+        'USB Vendor Name': 'Hewlett-Packard',
+        'idVendor': vendor_id,
+        'idProduct': product_id,
+        'bDeviceClass': 0,
+        'bDeviceSubClass': 0,
+        'bDeviceProtocol': 0,
+        'bcdUSB': 512,
+        'USBSpeed': 3,
+        'locationID': location,
+        'IORegistryEntryChildren': [],
+    }
+    if serial:
+        device['USB Serial Number'] = serial
+    interface = {
+        'IORegistryEntryID': 4294967297,
+        'IOObjectClass': 'IOUSBHostInterface',
+        'idVendor': vendor_id,
+        'idProduct': product_id,
+        'locationID': location,
+        'bInterfaceClass': PRINTER_CLASS if printer_interface else 3,
+        'bInterfaceSubClass': 1,
+        'bInterfaceProtocol': 2,
+        'bNumEndpoints': 2,
+    }
+    return plistlib.dumps([{'IORegistryEntryID': 1,
+                            'IORegistryEntryChildren': [device, interface]}])
+
+
+def capture(func, *args):
+    """Run a report function and return what it printed."""
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        func(*args)
+    return buf.getvalue()
+
+
+def report_from_dump(raw):
+    """Read a file passed to --from: a registry dump, or one of this script's own reports.
+
+    `--json` writes the parsed result rather than the registry, so a saved report can be
+    re-rendered later - or sent to someone whose printer is elsewhere - without the device
+    being present. A registry dump is tried first, because that is what the tool reads from
+    the system. Returning None means "this is a registry; parse it as one"."""
+    try:
+        plistlib.loads(raw)
+        return None
+    except Exception:
+        pass
+    try:
+        data = json.loads(raw.decode('utf-8'))
+    except Exception as exc:
+        raise SystemExit('cannot read the dump: %s' % exc)
+    if 'devices' not in data:
+        raise SystemExit('that file is neither a registry dump nor a report from this script')
+    return data
+
+
+def selftest():
+    """Check the report against a registry built by hand, because a printer may not be here.
+
+    The tool exists for the first moment the printer is attached, so this runs its whole
+    success path - device found, interface matched, serial compared, verdict written - on data
+    shaped like a real dump. Without it, the first hardware session would also be the first
+    time this code ever ran.
+    """
+
+    checks = 0
+    queues = cups_queues()
+    # Use the serial the queue actually asks for, when there is a queue on this machine.
+    wanted = queues[0]['serial'] if queues else '000000000Q80E182PR1a'
+
+    devices = usb_devices(synthetic_registry(serial=wanted))
+    printers = [d for d in devices if is_printer(d)]
+    assert len(printers) == 1, 'expected one printer, got %r' % printers
+    assert printers[0]['serial'] == wanted, printers[0]
+    checks += 2
+
+    report = capture(human, devices, queues, False)
+    wanted_lines = ['HP LaserJet Professional P1102', 'interface 7/1/2', 'endpoint(s)']
+    if queues:
+        wanted_lines.append('matches')
+    for needle in wanted_lines:
+        assert needle in report, 'the report is missing %r:\n%s' % (needle, report)
+        checks += 1
+
+    # Queues for other manufacturers must not be reported as serial mismatches: their serials
+    # always differ from this device's, and saying so would be noise, not a finding.
+    if any(queue_names_device(q, printers[0]) for q in queues):
+        assert 'DIFFERENT' not in report, 'a queue that names another device was flagged:\n%s' % report
+        checks += 1
+
+    # A printer with the wrong serial must be called out, not quietly accepted.
+    other = usb_devices(synthetic_registry(serial='NOT-THE-SERIAL-IN-THE-URI'))
+    report = capture(human, other, queues, False)
+    if queues:
+        assert 'DIFFERENT' in report, report
+        checks += 1
+
+    # And a device that is not a printer must not be mistaken for one.
+    keyboard = usb_devices(synthetic_registry(product='Keyboard', vendor_id=0x1234,
+                                              printer_interface=False))
+    assert not [d for d in keyboard if is_printer(d)], keyboard
+    report = capture(human, keyboard, queues, False)
+    assert 'no USB Printer-class device' in report, report
+    checks += 2
+
+    print('preflight self-test: %d checks passed' % checks)
+    return 0
 
 
 def main(argv):
@@ -288,10 +437,28 @@ def main(argv):
                     help='dump everything collected as JSON, for diffing two runs')
     ap.add_argument('--all', action='store_true',
                     help='list every USB device, not just printers and hubs')
+    ap.add_argument('--from', dest='from_file', metavar='PLIST',
+                    help='read a saved `ioreg -a` registry dump, or a report this script wrote '
+                         'with --json, instead of the live registry')
+    ap.add_argument('--selftest', action='store_true',
+                    help='check the report against a hand-built registry, then stop')
     args = ap.parse_args(argv)
 
-    devices = usb_devices()
-    queues = cups_queues()
+    if args.selftest:
+        return selftest()
+
+    source = None
+    if args.from_file:
+        try:
+            source = open(args.from_file, 'rb').read()
+        except OSError as exc:
+            raise SystemExit('cannot read %s: %s' % (args.from_file, exc))
+    reported = report_from_dump(source) if source is not None else None
+    if reported is not None:
+        devices, queues = reported['devices'], reported.get('queues', [])
+    else:
+        devices = usb_devices(source)
+        queues = cups_queues()
     printers = [d for d in devices if is_printer(d)]
 
     if args.json:

@@ -274,6 +274,7 @@ privileges, so the first hardware moment is diagnostic rather than guesswork:
 PY=/opt/homebrew/bin/python3.13
 $PY scripts/preflight-usb.py
 $PY scripts/preflight-usb.py --all        # every USB device, not just printers and hubs
+$PY scripts/preflight-usb.py --selftest   # check the report without a printer
 ```
 
 It answers the four questions that decide what to do next:
@@ -292,6 +293,14 @@ Interfaces are matched back to their device by `locationID`. Endpoints are repor
 count only: IOKit does not publish endpoint addresses as registry entries, so the script
 does not invent them. It reads `ioreg -a` rather than `system_profiler SPUSBDataType`,
 which returns nothing on this machine.
+
+The tool exists for one moment, so its success path is checkable without one: `--selftest`
+runs the report against a registry built by hand - a P1102 answering with the serial the queue
+asks for, then with the wrong serial, then a keyboard - and checks what it says in each case.
+That is the difference between the first hardware session being this tool's first run and its
+eleventh. `--from FILE` reads either a saved `ioreg -a` dump or a report this script wrote
+with `--json`, so a dump from another machine can be read here, and today's report can be
+re-read later.
 
 Exit status is 0 when a printer-class device is attached, 1 when none is, 2 on failure, so
 it can be waited on:
