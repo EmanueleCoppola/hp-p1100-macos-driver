@@ -232,9 +232,10 @@ Verified by execution, on real captured data where it matters:
 - **The whole job, against a working driver.** `scripts/reference-compare.py` builds the
   open driver that supports this printer and requires our filter's output to be
   byte-identical to its, for the same page and options, once the clock-bearing
-  job-attribute line is removed. Twenty-five cases pass: the print options (defaults, econo
-  mode, density, manual feed, three copies, two pages), both resolutions the PPD offers, and
-  every page size it declares, plus a custom one. Between them they cover the wrapper, the
+  job-attribute line is removed. Twenty-eight cases pass: the print options (defaults, econo
+  mode, density, manual feed, three copies, two pages), both resolutions the PPD offers, every
+  page size it declares plus a custom one, and the layout CUPS applies before rasterising
+  (landscape, upside down, two pages per sheet). Between them they cover the wrapper, the
   chunk sequence, every item and its order, the geometry, the page size code, the compressed
   image and the final padding.
 - **HP's own encoder constants**, read out of its binary rather than assumed: the BIH

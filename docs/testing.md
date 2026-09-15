@@ -248,6 +248,10 @@ The page-size cases exist because the raster's page size name decides `ZJI_DMPAP
 comparing them is how eight names that our table did not carry - and which therefore went out
 as Letter - were found.
 
+It also covers the things CUPS does to a job *before* rasterising it, because those reach the
+filter only as pixels: landscape, a page rotated 180 degrees, and two pages on one sheet. Each
+is a case where the driver has nothing to do and a chance to get it wrong anyway.
+
 Two things are deliberately *not* in the case list, and both are recorded in
 `docs/differences.md`: duplex (the reference reorders and rotates pages host-side, we leave
 that to the printer) and the media code (it reaches us in the raster header, which is set
