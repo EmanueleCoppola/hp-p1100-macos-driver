@@ -72,12 +72,20 @@ Secondary (status/utility) path, used for `ReportLevels`, `ReportStatus`, `Clean
 ```text
 cupsd -> application/vnd.cups-command -> usbink (HP, x86_64 ONLY)
             uses IOKit directly (IOUSBDevice / IOUSBInterface, IOUSBInterfaceStruct182),
-            matches the device by USB Product Name + serial number
+            matches the device by USB Product Name + serial number, and sends
+            "GET /DevMgmt/ConsumableConfigDyn.xml HTTP/1.1" over that USB interface -
+            a hand-rolled HTTP client, with no networking code in the binary at all.
+            Reports the result as ATTR: marker-... plus <dd:ConsumablePercentageLevel...>
 ```
 
 `rastertozjs` does not open a USB device itself. It writes the encoded ZjStream to
 stdout and CUPS hands that to the backend. It *does* read the CUPS backchannel
 (`[…] creating read thread using cups backchannel`) when status reporting is active.
+
+The two paths therefore do not share a mechanism: printing goes through CUPS's backends,
+and supplies reporting is a USB-tunnelled HTTP request from the filter itself. That is why
+`docs/differences.md` treats the command path as a deliberate gap rather than something to
+bolt on cheaply.
 
 ## Component inventory (CONFIRMED)
 

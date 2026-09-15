@@ -83,7 +83,7 @@ This project must be clean. Concretely:
 | component | licence | consequence for us |
 |---|---|---|
 | **foo2zjs / foo2xqx** | GPL-2.0 | We may read it to understand the protocol and to produce *comparison* output. We must **not** copy code into this project unless we deliberately licence this project GPL-2.0-compatible. |
-| **Markus Kuhn's portable free JBIG library** (bundled by HP) | GPL-2.0-or-later, with a note offering other terms on request; plus a caveat that it ships no patent licence | We must not copy it. If we need JBIG we implement or link it deliberately, with the licence chosen on purpose. |
+| **Markus Kuhn's portable free JBIG library**, statically linked into HP's filter | GPL-2.0-or-later, with a note offering other terms on request; plus a caveat that it ships no patent licence | We must not copy it. If we need JBIG we implement or link it deliberately, with the licence chosen on purpose. |
 | **HP `.acl` device firmware** (P1005/P1006/P1505/1020) | proprietary HP | Not redistributable. Not needed for the P1102 (no firmware blob in its bundle). If firmware is ever needed, the driver must point at the user's own installed copy rather than bundling it. |
 | **HP `rastertozjs` / `usbink`** | proprietary | Golden reference only. Must not be committed to the repo, and must not be redistributed. |
 | **CUPS** | Apache-2.0 (Apple's fork ships with macOS) | Fine to link to / call. Our filter is a separate program. |
@@ -102,6 +102,14 @@ linked or shipped, and neither is a source of copied code:
 bundled in its own driver - which is precisely what makes it useful. Having it turns
 "write a JBIG encoder and hope" into "write a JBIG encoder and prove it byte for byte
 against the reference".
+
+That "the same library" is now evidence rather than inference. HP's `rastertozjs` for this
+printer exports jbigkit's own internal table symbols - `_jbg_nlps`, `_jbg_nmps`,
+`_jbg_dptable`, `_jbg_resred` - so it is the library itself, statically linked and wrapped
+in HP's `jbig::` C++ classes, not a reimplementation. One curiosity worth recording: the
+**P1102's** bundle carries no licence file at all, while the sibling `hplaserjetzjs.bundle`
+(the P1005/P1006/P1505/1020 driver) does, and that file is the GPL notice for Markus Kuhn's
+library, `jbig.c,v 1.1 2007`.
 
 **The licence we chose, and why.** This project is dual-licensed MIT OR Apache-2.0, at your
 option, with both texts taken verbatim from the SPDX licence list. That is possible because

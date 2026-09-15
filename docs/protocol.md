@@ -215,6 +215,11 @@ keeps its symbols, so `nm` and `otool -tvV` name what they are. **CONFIRMED**:
   `setTypicalLinePrediction(bool)`, `setEndOfStripeReset(bool)`, `setAtMove(int,int,int)`,
   `setLineStride(int)`, `setBitsPerPixel(int)` and `getBIH(jbig::BIH*)`. That is the same
   parameter set T.82 defines, so HP is not doing anything exotic.
+- The encoder underneath those classes is **jbigkit** itself, statically linked: the binary
+  exports Markus Kuhn's internal tables as `_jbg_nlps`, `_jbg_nmps`, `_jbg_dptable` and
+  `_jbg_resred`. The same library is what `scripts/jbig-oracle.sh` fetches, which is what
+  makes it a fair reference for our own encoder; `docs/research.md` covers the licensing
+  side of that fact.
 - `jbig::ZjbigEncoder`'s constructor writes the BIH defaults directly:
   `movb $0x5c, 0x93(%rbx)`, `movb $0x3, 0x92(%rbx)`, `movb $0x10, 0x90(%rbx)`. Offsets 0x90
   to 0x93 are the four bytes `getBIH` writes into BIH bytes 16..19 in order, so HP's
@@ -264,6 +269,43 @@ ManualFeed  ManualDuplex  EngineFuser  EngineScanner  EngineComm
 through IOKit by `USB Product Name` + `USB Serial Number`, opens an interface matched by
 class/subclass/protocol, and does synchronous bulk reads and writes (`mBulkOutPipe`,
 `mBulkInPipe`). **LIKELY** USB Printer class (0x07/0x01/0x02); needs the device attached.
+
+## The command path: HTTP over USB, not PJL
+
+**CONFIRMED by disassembly and by the literals in the binary.** `usbink` does not speak PJL
+to the printer, and it does not use the CUPS backchannel. It carries a small hand-rolled
+HTTP client - the strings `HTTP/`, `: `, `Transfer-Encoding: `, `chunked` and
+`Content-Length: ` sit next to the one request it sends - and it sends exactly this over the
+USB interface it opened:
+
+```text
+GET /DevMgmt/ConsumableConfigDyn.xml HTTP/1.1\r\n\r\n
+```
+
+There is no networking code in the binary at all: the undefined symbols are IOKit
+(`IOServiceGetMatchingServices`, `IOCreatePlugInInterfaceForService`, `IORegistryEntryCreateCFProperty`),
+Foundation, libcups and libc, with no `socket`, `connect`, `CFStream` or URL loading. The
+"web server" is therefore reached through the device's USB interface, which is what the
+`CMD:...HTTP...` entry in the printer's own IEEE 1284 identity is advertising.
+
+It reads `DEVICE_URI` from the environment, parses it with `httpSeparateURI`, and reports a
+failure rather than guessing when it is absent. For devices it cannot reach that way it
+falls back to Apple's helper at `/System/Library/Printers/Libraries/snmpInk` through
+`popen`, which is the network-printer path (the same bundle serves the wireless P1102w).
+
+The answer comes back as the supplies level and is handed to CUPS in the command-filter
+output format:
+
+```text
+ATTR: marker-colors=#000000 marker-levels=%d marker-names=Black marker-types=ink
+<dd:ConsumablePercentageLevelRemaining>%d</dd:ConsumablePercentageLevelRemaining>
+```
+
+with `<key>prtMarkerSuppliesLevel</key>` / `<integer>%d</integer>` assembled for the device
+description. That is the whole interface, and it is why `docs/differences.md` records the
+command path as a deliberate gap rather than an oversight: reproducing it means writing an
+IOKit client that tunnels HTTP over the bulk pipes, which is a second transport in a stack
+whose point is to keep the one Apple already ships.
 
 ## Model identity
 

@@ -165,4 +165,7 @@ every page rather than fail.
 
 `jbigkit` is **GPL**. It is used here strictly as a test oracle - the same role foo2zjs
 plays for the ZjStream container - and is never committed, never linked, and never shipped.
-Our encoder is written from the standard. See `docs/research.md`.
+Our encoder is written from the standard. It is also, as it happens, the same library HP
+links into its own filter: `rastertozjs` exports jbigkit's internal tables (`_jbg_nlps`,
+`_jbg_nmps`, `_jbg_dptable`, `_jbg_resred`), which is the strongest reason to trust it as
+the reference. See `docs/research.md`.

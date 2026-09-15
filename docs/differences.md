@@ -116,17 +116,26 @@ opening the printer over USB with IOKit and reading its status. Our generated PP
 that line and `*cupsCommands`, so **the supplies/clean items that HP's driver provided are
 gone** for this queue.
 
-Why: `usbink` is an x86_64 binary that talks to the device itself, and this project
-deliberately keeps transport in Apple's native usb backend instead of adding a second
-implementation of the same thing. That is an architectural choice, not a limitation of the
-approach: the transport is native and signed by Apple, and duplicating it would be more code
-to maintain for no gain in printing.
+What `usbink` actually does is now known, and it is worth recording because it changes what
+"restoring it" would mean. It does **not** speak PJL and does **not** use the CUPS
+backchannel: it carries a hand-rolled HTTP client and sends
+`GET /DevMgmt/ConsumableConfigDyn.xml HTTP/1.1\r\n\r\n` over the USB interface it opened,
+then reports the level as `ATTR: marker-...` plus a
+`<dd:ConsumablePercentageLevelRemaining>` element. The full evidence is in
+`docs/protocol.md`; the short version is that the binary contains no networking symbols at
+all, so the request must travel over the bulk pipes.
 
-Options for restoring it, in order of preference: a command filter that speaks PJL over the
-CUPS backchannel, which needs no libcups since the backchannel is just a file descriptor
-CUPS hands the filter; or a small IOKit helper. Neither is written yet because neither is
-verifiable without the printer attached, and writing untested device code against a protocol
-whose responses we have never seen is how you get a component that looks finished and is not.
+Why we do not do that: it means writing an IOKit client and a second transport for a
+device's embedded web server, in a stack whose point is to keep the transport Apple already
+ships - and for printing it changes nothing. The two mechanisms this document used to
+propose (PJL over the CUPS backchannel) would have been a different protocol from the one
+the printer actually answers, which is the kind of plausible-looking substitute this
+project is trying not to ship.
+
+It also may not be worth building even with hardware: the P1102 is a single-cartridge
+engine whose level reporting is a local web page, and a USB-attached unit has no address
+for the `snmpInk` fallback either. What a hardware session should establish first is simply
+whether the request over USB produces a level at all.
 
 **This is the one functional regression relative to the working driver, and it does not
 affect printing.**

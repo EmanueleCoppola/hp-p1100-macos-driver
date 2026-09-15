@@ -187,7 +187,8 @@ known-good payloads above, and checking our own encoder byte for byte once it ex
 
 Pinned bottle: `sha256 a7cc930c8a3652ca...`, arm64_tahoe, jbigkit 2.1. It is GPL and is
 used only as an oracle: never committed, never linked, never shipped. `jbigkit` is exactly
-the library HP itself bundled, which is what makes it the right reference.
+the library HP itself links into `rastertozjs` for this printer - its internal table symbols
+are visible in that binary - which is what makes it the right reference.
 
 `encode` passes the parameters we target, `-d 0 -p 92 -m 0 -s 128 -o 3`, and appends any
 extra arguments, so `encode in.pbm out.jbg -p 0` also produces the no-options
@@ -431,36 +432,39 @@ cupsd reaches the filter at all with our PPD, which the first real print answers
 
 
 
-## Golden-master strategy, and why it is currently blocked
+## Golden-master comparison: what was intended, and what was done
 
-
-The intended reference pipeline was:
+The plan for this comparison was:
 
 ```text
 deterministic page -> CUPS raster -> HP rastertozjs -> old-driver-output.bin
 same page          -> CUPS raster -> our encoder      -> new-driver-output.bin
 ```
 
-`rastertozjs` cannot be executed on this machine (x86_64 + no Rosetta + missing
-`libcups`). Three ways forward, in order of preference:
+HP's own `rastertozjs` still cannot be executed here - x86_64, no Rosetta 2, no x86_64 dyld
+shared cache - and running it would need a `libstdc++.6.dylib` that does not exist on this
+machine either. So HP's *bytes* remain uncapturable, and that has not changed.
 
-1. **Differential capture against the printer.** Send our own encoder's output,
-   capture what the device tolerates, and compare against foo2zjs output generated
-   off-machine. Keeps us honest without needing the old binary to run.
-2. **Run the old filter under a harness.** Install Rosetta 2, then supply a tiny
-   `libcups`/`libcupsimage` compatibility shim (`cupsRasterOpen`, `cupsRasterReadHeader2`,
-   `cupsRasterReadPixels`, …) so the reference filter can read our raster and emit its
-   ZjStream. This is legitimate for *test fixture generation* only; it is explicitly not
-   the deliverable, and it does not fix the missing `libstdc++.6.dylib`.
-3. **Capture from a machine where the driver still works** (an Intel Mac, or a Linux box
-   running foo2zjs) and bring the `.bin` back as a fixture.
+What did change is that the reference **implementation** turned out to be buildable here,
+because the toolchain gate is a shim (see the first section). That turned option 3 of the
+original list - capture from a machine where the driver works - into something that runs
+locally: `scripts/foo2zjs-oracle.sh` builds the open driver that supports this printer, and
+`scripts/reference-compare.py` compares whole jobs against it, byte for byte, over a set of
+real option combinations. That is the comparison described under "The reference driver, as a
+runnable golden master" above, and it is what `docs/differences.md` now reports against.
 
-## Running the real code without a compiler (wasm)
+For HP's own output specifically, the binary can still be *read* even though it cannot be
+run, which is how its BIH defaults and its complete PJL literal list were determined. Where
+the two implementations are known to differ - the wrapper, the adaptive template - HP's side
+is documented from that reading rather than measured, and tagged accordingly.
 
-The licence gate blocks linking *native* binaries, not wasm: wasm links with Rust's own
-bundled rust-lld and needs no SDK. So the real command line tool can be built and executed
-here, which is how the Rust implementation was checked against the reference rather than
-only unit tested.
+## Running the real code without a native linker (wasm)
+
+wasm links with Rust's own bundled rust-lld and needs no SDK at all, which is why the test
+suite runs there (`scripts/test-wasm.sh`): it works whatever state the machine's toolchain is
+in, and it was the only way to run Rust at all before the toolchain binaries were found.
+Native builds work now, so this is a convenience rather than a necessity - but it is also
+what makes the job pipeline testable on a machine with no linker at all.
 
 ```bash
 cargo build --target wasm32-wasip1 -p p1102-cli --offline
