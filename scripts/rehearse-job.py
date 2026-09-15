@@ -91,6 +91,60 @@ class Lever(Exception):
     """An environment override that did not do what the bring-up notes claim."""
 
 
+# What each PPD option must do to the job. The filter maps these names - CUPS passes the PPD
+# spelling, not the IPP one - and the mapping is unit-tested and compared against the reference
+# driver separately; this checks it once more through the whole binary, at the boundary where a
+# name that no longer matches would silently do nothing.
+OPTION_EFFECTS = [
+    # Simplex is announced once, on the document; a duplex mode is announced on the page, the
+    # image and the page end, which is what the reference driver does as well.
+    ('Duplex=None', {'doc': {'DMDUPLEX': 1}}),
+    ('Duplex=DuplexNoTumble', {'page': {'DMDUPLEX': 2}, 'image_end': {'DMDUPLEX': 2},
+                               'end': {'DMDUPLEX': 2}}),
+    ('Duplex=DuplexTumble', {'page': {'DMDUPLEX': 3}, 'image_end': {'DMDUPLEX': 3},
+                             'end': {'DMDUPLEX': 3}}),
+    ('InputSlot=Manual', {'page': {'DMDEFAULTSOURCE': 4}}),
+    ('EconoMode=True', {'items': {'ECONOMODE': 1}, 'pjl': ['@PJL SET ECONOMODE=ON']}),
+    ('pjlDensity=1', {'pjl': ['@PJL SET DENSITY=1']}),
+    ('pjlDensity=5', {'pjl': ['@PJL SET DENSITY=5']}),
+    ('pjlJamRecovery=True', {'pjl': ['@PJL SET JAMRECOVERY=AUTO']}),
+    ('pjlJamRecovery=False', {'pjl': ['@PJL SET JAMRECOVERY=OFF']}),
+]
+
+
+def check_options(options, job, zc):
+    """Assert the effect of every PPD option named on the command line, in the real job."""
+    lines = []
+    view = zc.semantic_view(job)
+
+    def items_of(op):
+        for kind, event in view['events']:
+            if kind == 'chunk' and event['op'] == op:
+                return event['items']
+        return {}
+
+    scopes = {'doc': items_of('START_DOC'), 'page': items_of('START_PAGE'),
+              'image_end': items_of('END_JBIG'), 'end': items_of('END_PAGE')}
+    for option, expected in OPTION_EFFECTS:
+        if option not in options.split():
+            continue
+        for scope in ('doc', 'page', 'image_end', 'end'):
+            for name, value in expected.get(scope, {}).items():
+                got = scopes[scope].get(name)
+                # The semantic view renders some items as labels ("2 (long-edge)"), so compare
+                # the leading number: readable whatever a tool adds after it.
+                got_number = str(got).split()[0] if got is not None else None
+                if got_number != str(value):
+                    raise Lever('%s should set %s to %s on the %s chunk, but the job has %r'
+                                % (option, name, value, scope, got))
+                lines.append('%s: %s carries %s=%s' % (option, scope, name, value))
+        for needle in expected.get('pjl', []):
+            if needle.encode() not in job:
+                raise Lever('%s should put %r in the prologue' % (option, needle))
+            lines.append('%s: the prologue says %s' % (option, needle))
+    return lines
+
+
 def check_levers(raster_path, options, work, zc):
     """Run the environment overrides the bring-up notes tell you to reach for.
 
@@ -282,6 +336,13 @@ def main(argv):
     if diffs:
         return fail('the job differs when the raster arrives on stdin: %s' % diffs)
     print('       the same job comes out with the raster on stdin')
+
+    # And that each option CUPS would pass actually did something, checked on this job.
+    try:
+        for line in check_options(args.options, job, zc):
+            print('       %s' % line)
+    except Lever as exc:
+        return fail(str(exc))
 
     _, stream, _ = zc.split_framing(job)
     chunks = zc.parse_chunks(stream)

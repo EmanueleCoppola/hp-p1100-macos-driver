@@ -427,6 +427,13 @@ items and the PJL, and that the uncompressed path's payload is byte-for-byte the
 raster describes. Pass --raster to rehearse a captured or synthesised raster instead of a
 generated one. Each case below was judged by the reference decoder:
 
+That second point is asserted rather than assumed: every PPD option named on the command line
+is checked against the item or the PJL line it is supposed to change, so an option whose name
+stopped matching would fail the rehearsal instead of quietly doing nothing. Simplex and duplex
+are asserted on the chunks that actually carry them - the document for `Duplex=None`, the page,
+image end and page end for a duplex mode - because that is where the reference driver puts
+them too.
+
 It prefers the native filter - the artifact that would be installed - and falls back to the
 wasm build when there is none, which links with Rust's own bundled linker and needs no SDK.
 Both routes were checked the same way: the whole rehearsal, levers and stdin comparison
@@ -435,7 +442,7 @@ included, was run with the native binary moved aside, and the wasm build carried
 | case | result |
 |---|---|
 | generated one-page Letter raster | passes |
-| PPD options: duplex, manual feed, econo mode, density, jam recovery | passes, and the 13 expected semantic changes appear |
+| PPD options: duplex (none, long edge, short edge), manual feed, econo mode, density, jam recovery | passes, and each option's effect is asserted on the item or PJL line it should change |
 | raster on stdin instead of a file argument | identical job |
 | the four bring-up overrides: no PJL, density, econo mode, raw | each changes the job the way the hardware notes say it does |
 | captured two-page raster, 62 MB | both pages decode to the expected bitmaps |
@@ -586,12 +593,25 @@ The native binaries were then checked against the same oracle as everything else
 than being trusted because they link:
 
 - the CLI's generated test page is **byte-identical** to the job from the reference-verified
-  Python path;
+  Python path, and the wasm CLI's is byte-identical to both;
 - the filter, given a real 31 MB CUPS raster produced by Apple's own cgpdftoraster, emits a
   job whose image the **reference decoder** decodes back to exactly the expected bitmap
   (4992x6400, 3,993,600 bytes);
-- the native and the wasm builds produce **semantically identical** jobs, so the verification
-  done through wasm earlier carries over to the artifact that would actually be installed.
+ - the native and the wasm builds agree **byte for byte**, not merely semantically, so the
+   verification done through wasm earlier carries over to the artifact that would be installed.
+
+The three-way comparison is exact rather than approximate because the CLI's test page stamps
+the epoch instead of the clock, which makes its output reproducible; the filter is the one that
+takes the real time. `make-test-job.py`'s `--timestamp` defaults to the same value, so
+reproducing it needs no flags:
+
+```bash
+PY=/opt/homebrew/bin/python3.13
+$PY scripts/make-test-job.py --pattern square --page a4 --timestamp 19700101000000 -o /tmp/py.zjs
+target/release/p1102 test-page square --page a4 -o /tmp/native.zjs
+node scripts/wasi-run.mjs target/wasm32-wasip1/debug/p1102.wasm test-page square --page a4 -o /tmp/wasm.zjs
+cmp /tmp/py.zjs /tmp/native.zjs && cmp /tmp/py.zjs /tmp/wasm.zjs
+```
 
 What remains unverified about the native path is only what needs the printer: no page has
 ever been sent to one.
