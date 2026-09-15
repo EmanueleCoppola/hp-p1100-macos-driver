@@ -427,6 +427,11 @@ items and the PJL, and that the uncompressed path's payload is byte-for-byte the
 raster describes. Pass --raster to rehearse a captured or synthesised raster instead of a
 generated one. Each case below was judged by the reference decoder:
 
+It prefers the native filter - the artifact that would be installed - and falls back to the
+wasm build when there is none, which links with Rust's own bundled linker and needs no SDK.
+Both routes were checked the same way: the whole rehearsal, levers and stdin comparison
+included, was run with the native binary moved aside, and the wasm build carried it.
+
 | case | result |
 |---|---|
 | generated one-page Letter raster | passes |
