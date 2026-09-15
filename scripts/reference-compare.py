@@ -72,6 +72,13 @@ CASES = [
     # The other resolution the PPD offers: CUPS puts 600x600 in the raster for both, so the
     # job should be the same as the default case, and it is worth knowing if it is not.
     ('600x600 resolution', ['Resolutions=600x600dpi'], '', ['-p', '1'], 'text-1p.txt'),
+    # Orientation: the chain rotates the page *inside* the raster, so both sides receive the
+    # already-rotated bitmap and neither driver has to do anything with it. Worth a case
+    # because it is a thing users do and nothing else here covers it.
+    ('landscape', ['landscape'], '', [], 'text-1p.txt'),
+    ('upside down', ['orientation-requested=3'], '', [], 'text-1p.txt'),
+    # N-up is the same kind of thing: CUPS lays the pages out before rasterising them.
+    ('two pages per sheet', ['number-up=2'], '', [], 'text-2p.txt'),
 ]
 
 # Not compared here: the media code. It reaches our filter in the raster header's
