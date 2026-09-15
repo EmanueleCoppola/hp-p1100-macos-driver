@@ -449,9 +449,10 @@ That check earned its keep immediately - it caught the aligned columns past the 
 padded black rather than white, where the one-bit path's padding is white and a zeroed two-bit
 margin is not. It is in the filter too, behind the `p1102Grey` option - `Mono1` by default, `Screened2`
 to ask for this - which reads the two tables from beside its own binary or from `P1102_TONES`.
-What is still missing is the installer side of it: putting those files there and offering the
-option in the PPD, which means touching `scripts/install.sh` and `scripts/make-ppd.py`. That is
-deliberately last, because it is what would change what a queue starts sending.
+The installer does both halves: `scripts/make-ppd.py` injects the option group, with `Mono1` as its
+default, and `scripts/install.sh` reads the two tables out of the installed HP driver and installs
+them beside the filter. A machine that has no HP driver left still gets a working queue: only
+the option that needs them fails, and the filter says so.
 
 The item side is done with it: `PageGeometry`'s `bits_per_pixel` is what `ZJI_VIDEO_BPP`,
 `ZJI_VIDEO_X` and `ZJI_NBIE` are computed from, and the job layer sets it from the same option
