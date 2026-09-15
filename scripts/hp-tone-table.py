@@ -209,6 +209,9 @@ def convert(raster_path, table, out_dir, stem='page'):
         row = bytearray([3]) * aligned
         groups = width // COLS
         data_row = bytearray(width)
+        # Bilevel in the page, if not necessarily in the row padding: bytes(..) makes this a
+        # C-level pass over the payload rather than a Python loop over thirty million pixels.
+        bilevel = set(grey) <= {0, 255}
         with open(path, 'wb') as f:
             f.write(b'P5\n%d %d\n3\n' % (aligned, height))
             for y in range(height):
@@ -222,11 +225,26 @@ def convert(raster_path, table, out_dir, stem='page'):
                             c:c + groups * COLS:COLS].translate(per_column[c])
                 for x in range(groups * COLS, width):
                     data_row[x] = level_of(table, src[x], x, y)
+                if bilevel:
+                    # A page of only 0 and 255 screens to only 0 and 3, so the two-bit page is
+                    # the one-bit page with its levels scaled: that is what makes a one-bit and
+                    # a two-bit job of the same page comparable on a printer, and it is worth
+                    # failing on rather than noticing later.
+                    for x in range(width):
+                        want = 0 if src[x] < 128 else 3
+                        if data_row[x] != want:
+                            raise SystemExit(
+                                '%s: grey %d at (%d, %d) screened to level %d, and a bi-level '
+                                'page has to come out 0 or 3' % (raster_path, src[x], x, y,
+                                                                 data_row[x]))
                 row[:width] = data_row
                 f.write(row)
                 for x in range(width, aligned):
                     row[x] = 3
         written.append((path, aligned, height))
+        if bilevel:
+            print('   %s is bi-level, and the screening agrees with thresholding it'
+                  % os.path.basename(path))
     return written
 
 

@@ -231,7 +231,10 @@ have sent; the pages are written at the aligned width, and `-b` selects binary r
 Gray-coded words in the two planes, which a decoder has to be told because the BIE does not say.
 `--bits 2` is what makes the page items read `ZJI_VIDEO_BPP` 2, `ZJI_NBIE` 2 and
 `ZJI_VIDEO_X` = width/2, which is our reading of HP's own item emission and needs the printer
-to confirm.
+to confirm. A page of only black and white screens to itself - the tables take 0 to level 0 and
+255 to level 3, and `--convert` says so when it sees such a page - so a one-bit job and a
+two-bit job of the same document are the same page, which is what makes comparing them on a
+printer mean anything.
 
 ## How the plan maps onto this repository
 

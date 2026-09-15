@@ -464,7 +464,11 @@ printer.
 
 One observation settles whether the two-bit difference matters in practice: print a graded fill
 or antialiased text and compare it with the same page through HP's queue while that still runs.
-If ours looks worse in a way someone would notice, the work is the two-bit path above.
+If ours looks worse in a way someone would notice, the work is the two-bit path above - and the
+same comparison can be made against our own queue once the two-bit page can be sent, because a
+bi-level page screens to itself: the tables take grey 0 to level 0 and grey 255 to level 3, so a
+one-bit job and a two-bit job of the same document are the same page and the difference between
+them is the depth and nothing else.
 
 ## What settles the unverified items
 
