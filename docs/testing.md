@@ -373,9 +373,10 @@ URI from `argv[0]` - or, as here, from `DEVICE_URI` - and reads the job from the
 or stdin, all documented in backend(7), and Apple's `usb` backend is world-executable, so
 **sending a job needs no administrator** and creates no queue to clean up. With no printer
 attached it says so plainly (`STATE: +offline-report`, `INFO: The printer is offline.`) and
-keeps retrying, which is itself the check that the invocation is right before anything is
-plugged in. The same binary with no arguments lists the USB devices CUPS can see, which is worth
-comparing with what `scripts/preflight-usb.py` says from the registry side.
+keeps retrying - measured at fifty seconds and still going, so Ctrl-C it - which is itself the
+check that the invocation is right before anything is plugged in. The same binary with no
+arguments lists the USB devices CUPS can see, which is worth comparing with what
+`scripts/preflight-usb.py` says from the registry side.
 
 What that path does not cover is the wiring: it hands bytes to the backend, so it tests the job
 and the transport but not CUPS's chain from the PPD through the filter. That is what the raw
