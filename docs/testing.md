@@ -669,9 +669,11 @@ character on line 1"). Its presence on macOS was assumed away once; it is there.
 CUPS's conformance test runs in both places, with different strictness. `scripts/ppd-compare.py`
 runs it with its two file checks ignored, since nothing is installed under
 `/Library/Printers/p1102` while a developer runs it; install.sh runs it strictly once the filter
-and the icon are in place, which is where their permissions are checked too. That test is also
-what requires the option we add to carry a label in every language the PPD declares - thirteen
-of them, so the generator writes thirty-nine translation lines rather than three.
+and the icon are in place. Those two checks ask for ownership rather than a mode - a copy of the
+filter at 0755 in a temporary directory fails them, HP's own root-owned pair passes - which is
+what `install -o root -g wheel` provides. That test is also what requires the option we add to
+carry a label in every language the PPD declares: thirteen of them, so the generator writes
+thirty-nine translation lines rather than three.
 
 ## Golden-master comparison: what was intended, and what was done
 
