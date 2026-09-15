@@ -57,6 +57,14 @@ run() {
 
 die() { echo "error: $*" >&2; exit 1; }
 
+# The lines of a diff against the source PPD that may legitimately change. The source arrives on
+# stdin, so a gzipped one can be decompressed into it without a temporary file.
+ppd_diff() {
+    diff - "$1" 2>/dev/null | grep -E '^[<>]' | grep -vE \
+        '^[<>] \*(%%|NickName|[a-zA-Z_@-]+\.Translation NickName/|cupsFilter: "application/vnd\.cups-(raster|command)|cupsCommands|APPrinterUtilityPath)' \
+        | grep -vE '^[<>] *$' || true
+}
+
 # --- validating a generated PPD ---------------------------------------------
 
 # Two things CUPS itself cannot do here, both checked rather than assumed: macOS ships no
@@ -80,16 +88,20 @@ check_ppd() {
     done
 
     # Compare against the source. Only these line kinds may differ; anything else is a bug in
-    # the generator, not a cosmetic difference.
-    probe=$(mktemp -t p1102-ppd-source) || die "cannot create a temporary file"
+    # the generator, not a cosmetic difference. The source is piped in rather than copied to a
+    # temporary file, because the source may be gzipped and a pipe keeps its bytes exactly -
+    # and because a temporary file here would need cleaning up on every failure path.
     case "$SRC_PPD" in
-        *.gz) gzcat "$SRC_PPD" > "$probe" || die "cannot decompress $SRC_PPD" ;;
-        *)    cp "$SRC_PPD" "$probe" || die "cannot read $SRC_PPD" ;;
+        *.gz) decompress=gzcat ;;
+        *)    decompress=cat ;;
     esac
-    unexpected=$(diff "$probe" "$ppd" 2>/dev/null | grep -E '^[<>]' | grep -vE \
-        '^[<>] \*(%%|NickName|[a-zA-Z_@-]+\.Translation NickName/|cupsFilter: "application/vnd\.cups-(raster|command)|cupsCommands|APPrinterUtilityPath)' \
-        | grep -vE '^[<>] *$' || true)
-    rm -f "$probe"
+    changes=$("$decompress" "$SRC_PPD" | diff - "$ppd" 2>/dev/null | grep -cE '^[<>]' || true)
+    unexpected=$("$decompress" "$SRC_PPD" | ppd_diff "$ppd")
+    # Fail closed: if the comparison produced nothing at all then it did not run - the source
+    # could not be read, or the helper is missing - and an empty result would otherwise read
+    # exactly like a clean one.
+    [ "${changes:-0}" -gt 0 ] \
+        || die "comparing the generated PPD with $SRC_PPD produced no differences at all, so the check did not run"
     if [ -n "$unexpected" ]; then
         echo "$unexpected" >&2
         die "the generated PPD changes lines it should not (above)"
@@ -167,10 +179,14 @@ if [ "$DRY" = 1 ]; then
     # the artifact as well as about the commands.
     if [ "$PYTHON_OK" = 1 ]; then
         probe_ppd=$(mktemp -t p1102-ppd-check.ppd) || die "cannot create a temporary file"
-        "$PYTHON" "$REPO/scripts/make-ppd.py" "$SRC_PPD" "$DEST/p1102-filter" "$probe_ppd" \
-            || die "PPD generation failed"
-        check_ppd "$probe_ppd"
-        rm -f "$probe_ppd"
+        # A subshell with its own trap, so the file goes away however this ends - including the
+        # check failing, which is how one was left behind after the check's first version died.
+        (
+            trap 'rm -f "$probe_ppd"' EXIT
+            "$PYTHON" "$REPO/scripts/make-ppd.py" "$SRC_PPD" "$DEST/p1102-filter" "$probe_ppd" \
+                || exit 1
+            check_ppd "$probe_ppd"
+        ) || die "the PPD could not be generated or did not pass its check"
     fi
 else
     run "$PYTHON" "$REPO/scripts/make-ppd.py" "$SRC_PPD" "$DEST/p1102-filter" "$DEST/p1102.ppd"

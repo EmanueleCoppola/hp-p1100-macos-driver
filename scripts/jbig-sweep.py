@@ -18,6 +18,7 @@ Usage:
 import argparse
 import os
 import random
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -110,6 +111,10 @@ def main(argv):
     if failures:
         return 1
     print('every case is byte-identical to the reference encoder')
+    # The scratch directory holds one bitmap and two encodings per case, and a passing run has
+    # no reason to leave them behind; a failing one keeps them to look at.
+    if not failures:
+        shutil.rmtree(work, ignore_errors=True)
     return 0
 
 
