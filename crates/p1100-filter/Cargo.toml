@@ -13,3 +13,7 @@ p1100-protocol = { path = "../p1100-protocol" }
 [[bin]]
 name = "p1100-filter"
 path = "src/main.rs"
+
+[[bin]]
+name = "p1100-usbink"
+path = "src/bin/p1100-usbink.rs"
