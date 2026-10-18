@@ -40,7 +40,7 @@ ESC % - 1 2 3 4 5 X @PJL JOB\n
 @PJL USTATUS PAGE = ON\n
 @PJL USTATUS TIMED = 30\n
 @PJL SET JOBATTR="JobAttr4=<YYYYMMDDHHMMSS>"\0
-ESC % - 1 2 3 4 5 X
+@PJL ENTER LANGUAGE=ZJS\n
 "JZJZ"                        <- 4-byte ZJS stream signature
 <ZJT_START_DOC chunk + items>
   <ZJT_START_PAGE chunk + items>
@@ -69,14 +69,11 @@ cupsPJL  pjlDensity  pjlJamRecovery  pjlDuplexOffset
 
 and the PPD carries `*cupsPJL pjlDensity: "@PJL SET DENSITY = %s%n"`.
 
-**Differences matter**: HP's macOS driver uses `@PJL JOB NAME="..."`, adds
-`@PJL ENTER LANGUAGE="..."` and `@PJL EOJ`, and its literals do not show the
-`JOBATTR`/`RET`/`TIMED` lines. **CONFIRMED** the `ENTER LANGUAGE` argument is `ZJS` for this
-model: the code picks between the literals `ZJS` and `HBS` on `model & 1`, and the PPD's
-`*cupsModelNumber: 256` leaves that bit clear. So the two implementations are semantically
-equivalent but not textually identical, which is exactly the class of difference the
-golden-master comparison has to tolerate; `docs/differences.md` item 1 has HP's full
-sequence.
+**Differences matter**: HP's macOS driver uses `@PJL JOB NAME="..."` and `@PJL EOJ`, while
+the native filter keeps the simpler job command and `JOBATTR` line. The native filter ends the
+PJL setup with `@PJL ENTER LANGUAGE=ZJS`; without that explicit switch, this P1102 accepted
+the USB bytes but entered attention state and produced a blank page. The language argument is
+confirmed by the HP binary: its model 256 selects `ZJS` rather than `HBS`.
 
 ## Record format
 
@@ -332,9 +329,45 @@ ManualFeed  ManualDuplex  EngineFuser  EngineScanner  EngineComm
 ```
 
 **CONFIRMED** the command filter `usbink` answers `ReportLevels`: it locates the device
-through IOKit by `USB Product Name` + `USB Serial Number`, opens an interface matched by
-class/subclass/protocol, and does synchronous bulk reads and writes (`mBulkOutPipe`,
-`mBulkInPipe`). **LIKELY** USB Printer class (0x07/0x01/0x02); needs the device attached.
+through IOKit by `USB Product Name` + `USB Serial Number`, opens the HP EWS interface
+`0xff/0x02/0x10`, and does synchronous bulk reads and writes. The same interface was opened
+through macOS IOKit by the native Rust replacement, which retrieved the attached P1102's 20%
+black-toner level. The CUPS filter uses the legacy IOKit interface client, as HP's original
+filter does; direct invocations use `IOUSBHost`.
+
+## When a job is finished: the printer's own notification
+
+**CONFIRMED by disassembly of HP's `rastertozjs`.** At the end of a job the reference filter
+does not simply stop writing. It writes a UEL, `@PJL EOJ` and another UEL, and then calls
+`closeReadThread()`, which is a `pthread_join` on the thread that reads the CUPS backchannel
+(fd 3). Only once that thread has returned does it send `@PJL USTATUSOFF` and the final UEL.
+The reader ends when the printer's status stream carries the end of the job; its literals are
+
+```text
+USTATUS PAGE\r\n        USTATUS JOB\r\nSTART
+USTATUS JOB\r\nCANCELED  USTATUS JOB\r\nEND
+```
+
+and the prologue asks for them with `@PJL USTATUS JOB = ON`, which this printer accepts: HP's
+own PPD uses the same spaced spelling for `@PJL SET DENSITY = %s`.
+
+That wait is what the row in Print Center reflects. CUPS keeps a job open while any of its
+filters is still running, so a filter that exits as soon as the bytes have been handed to the
+backend ends the job while the printer is still warming up, and the row disappears before the
+sheet does. The native filter now matches the reference: it flushes the job, reads fd 3 until
+the printer reports the end of the job, and only then writes `@PJL USTATUSOFF` and exits.
+
+Apple's USB backend does its own part - it sets `cups-waiting-for-job-completed` and waits for
+its read thread with a bounded timeout before aborting the pending read - but that wait only
+keeps a printer that answers the class status channel; the job's lifetime belongs to the
+filter.
+
+A filter that waits cannot be allowed to wait forever, so the wait is bounded: 30 seconds for
+the printer to say anything about the job at all, 90 seconds between pages, five minutes in
+total. Running out ends it with a `WARNING:` rather than holding the queue. The 18 October
+log is the reason for the first of those: a job that had printed correctly was followed by
+jobs that sat for 90 seconds each and one that CUPS stopped as unresponsive, while the printer
+said nothing.
 
 ## The command path: HTTP over USB, not PJL
 
@@ -588,5 +621,10 @@ backend reports those reasons anyway; `docs/differences.md` item 4 covers it.
 **CONFIRMED** the PPD's `1284DeviceID` is
 `MANUFACTURER:Hewlett-Packard;MODEL:HP LaserJet Professional P1102`; CUPS addresses the
 device as `usb://Hewlett-Packard/HP LaserJet Professional P1102?serial=000000000Q80E182PR1a`.
-**UNKNOWN, needs hardware:** vendor/product id, endpoint addresses and packet sizes, and
-whether the interface is Printer class (0x07/0x01/0x02) or vendor-specific.
+**CONFIRMED on the attached P1102:** USB VID/PID `03f0:002a`, USB 2.0 High Speed
+(`UsbLinkSpeed=480000000`), device class `0`, and a Printer-class interface `7/1/2` with
+two endpoints. The same configuration also exposes a vendor-specific HP EWS interface
+`255/2/16` with three endpoints. The macOS `ioreg` output does not expose the individual
+endpoint addresses or maximum packet sizes, so those fields remain **UNKNOWN**. The Apple
+USB backend opens the device successfully and accepts complete ZjStream transfers through
+the standard printing interface.

@@ -2,7 +2,8 @@
 
 ## What gets installed, and where
 
-Four files, all under a directory we own, plus one new CUPS queue:
+Five runtime files and a .p1100-installed ownership marker under a dedicated directory,
+plus one new CUPS queue:
 
     /Library/Printers/p1100/p1100-filter    our ARM64 CUPS filter
     /Library/Printers/p1100/p1100.ppd       generated PPD pointing at that filter
@@ -25,11 +26,17 @@ Nothing outside /Library/Printers/p1100 is written. Specifically:
 
 ## Why a separate queue instead of editing the HP one
 
-The existing HP_LaserJet_Professional_P1102 queue still points at HP's rastertozjs, which
-cannot run on this machine at all (x86_64, with no Rosetta and no x86_64 runtime). Leaving it
+The existing HP_LaserJet_Professional_P1102 queue still points at HP's rastertozjs, which is
+x86_64 and depends on Rosetta translation; on this Mac it crashes when fed the CUPS raster.
+Leaving it
 untouched means the change is reversible, both queues can coexist, and if HP's driver is
 ever fixed there is nothing to undo. When the new queue is proven, delete the old one by
 hand if you want to.
+
+The installer does not silently change the user's default printer. Select
+`HP_LaserJet_P1100_native` in the print dialog, or set it explicitly with:
+
+    lpoptions -d HP_LaserJet_P1100_native
 
 ## How CUPS finds the filter
 
@@ -55,8 +62,8 @@ scripts/make-ppd.py reads the installed PPD and changes only the driver wiring:
 | change | why |
 |---|---|
 | the application/vnd.cups-raster filter line is repointed at our filter | HP's is x86_64 |
-| the application/vnd.cups-command filter line is dropped | it points at HP's usbink, which we have no replacement for yet, so CUPS must not try to run it |
-| *cupsCommands is dropped | no command filter to serve ReportLevels |
+| the application/vnd.cups-command filter line is repointed at our Rust command filter | it replaces HP's Intel-only usbink and reads the printer's USB EWS consumable report |
+| *cupsCommands is preserved | the command filter serves ReportLevels for the Supplies view |
 | *APPrinterUtilityPath is dropped | that is HP's utility app |
 | *APPrinterIconPath is repointed at our icns | so the row shows a picture we ship, rather than one of HP's read out of HP's directory |
 | *NickName gains a " (native ARM64)" suffix, and the localised NickName translation keys follow it | so the two queues are distinguishable in the UI, without breaking localisation |
@@ -173,7 +180,7 @@ Options:
     --source-queue N    queue to inherit the device URI and PPD from
                                                      (default HP_LaserJet_Professional_P1102)
     --device URI        use this device URI instead of reading it from the source queue
-    --force             replace an existing queue of the same name
+    --force             replace an existing queue only if its PPD points at our filter
     --dest DIR          where to install         (default /Library/Printers/p1100)
     --no-queue          install the files and stop; no lpadmin, and no root needed
 
@@ -192,12 +199,17 @@ guard against a mistyped path.
     ./scripts/uninstall.sh --dry-run     # review
     sudo ./scripts/uninstall.sh
 
-That deletes the queue and removes /Library/Printers/p1100. HP's queue, files and receipts
-are left alone.
+That deletes the queue only after verifying its PPD points at our filter, removes the
+five known artifacts and ownership marker, and removes the directory only when empty.
+Unrelated files are preserved. HP's queue, files and receipts are left alone.
 
 `uninstall.sh` takes the same `--dest` as the installer, and refuses to delete a path that is
 not absolute, is empty, is `/`, or is inside Apple's or HP's trees. It also refuses the system
-destination without root, the same way the installer does.
+destination without root, the same way the installer does. Symlinked parent paths are
+resolved before protected locations are checked again. Installation requires an empty
+destination or one identified by the ownership marker (or a legacy matching PPD and
+filter); uninstallation requires that ownership evidence. Installation rejects artifact
+symlinks; uninstallation removes only named entries without following them recursively.
 
 ## Verifying an install
 

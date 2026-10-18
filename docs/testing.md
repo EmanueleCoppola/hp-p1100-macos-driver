@@ -43,8 +43,10 @@ macOS 27.0 (build 26A428), Darwin 27.0.0, Apple M2 Max, arm64
    `scripts/macho.py` and `scripts/elfinfo.py` remain as the pure-Python readers that need
    no Apple tooling at all.
 
-2. **No Rosetta 2.** `arch -x86_64 /usr/bin/true` -> `Bad CPU type in executable`.
-   Only `RosettaLinux` is present. No x86_64 dyld shared cache exists.
+2. **Rosetta 2 is available, but must not be part of the replacement path.**
+   `arch -x86_64 /usr/bin/true` succeeds and the HP filter launches under translation.
+   Feeding that filter the real CUPS raster still ends with `SIGSEGV` before any ZjStream
+   bytes are emitted, so the old executable cannot serve as a runnable golden master here.
 
 3. **`libstdc++.6.dylib` is not under `/usr/lib`**, and HP's filter needs it. The other two
    HP-era libraries are *not* missing: `libcups.2.dylib` and `libcupsimage.2.dylib` resolve
@@ -52,13 +54,11 @@ macOS 27.0 (build 26A428), Darwin 27.0.0, Apple M2 Max, arm64
    running here. An earlier version of this file said otherwise, because it checked
    `/usr/lib` for the file; that is not a valid test for a dylib on modern macOS.
 
-4. **No CUPS job history to read.** `/var/log/cups/` contains only `access_log`; there is no
-   `error_log`. cupsd's messages do reach the unified log - `log show --predicate
-   'process == "cupsd"'` returns its start-up chatter - but a filter invocation in it would
-   need a job to have run, and no job has run in the retained window, so the argv cupsd
-   actually passes could not be observed from here. `/etc/cups/printers.conf` is mode 600
-   root:_lp and was not read. After a real print, the unified log is the first place to look;
-   `docs/installation.md` has the command.
+4. **CUPS logs are sparse.** `/var/log/cups/` contains `access_log` but no persistent
+   `error_log`; the native queue's completed jobs and idle state were nevertheless observed
+   with `lpstat`, IPP attributes and the access log after the hardware tests. The filter's
+   argv contract is covered by the process and CUPS-boundary tests, while the actual native
+   queue invocation is recorded in the hardware section below.
 
 5. `sudo` is not passwordless (`sudo -n true` -> `a password is required`).
 
@@ -262,10 +262,12 @@ all - and requires byte identity; it is the check behind the claim in `docs/jbig
 
 ### The reference driver, as a runnable golden master
 
-HP's filter cannot run here, but `foo2zjs` - the open driver that supports this printer -
-can, and a job it produces is the closest available statement of what a working driver
-sends. `scripts/foo2zjs-oracle.sh` fetches and builds it out of a cache directory using
-Xcode's toolchain directly (see the toolchain note above).
+HP's filter can be launched only as an x86_64 translated process, but it is not a usable
+golden master on this OS: with the complete CUPS environment and a real CUPS raster it
+aborts after a partial 437-byte prologue at `CupsRaster.h:getBandedPixels`. `foo2zjs` - the
+open driver that supports this printer - can run natively, and a job it produces is the
+runnable whole-job oracle. `scripts/foo2zjs-oracle.sh` fetches and builds it out of a cache
+directory using Xcode's toolchain directly (see the toolchain note above).
 
 ```bash
 ./scripts/foo2zjs-oracle.sh fetch        # idempotent; GPL, test-only, never committed
@@ -401,8 +403,9 @@ It answers the questions that decide what to do next:
 
 Interfaces are matched back to their device by `locationID`. Endpoints are reported as a
 count only: IOKit does not publish endpoint addresses as registry entries, so the script
-does not invent them. It reads `ioreg -a` rather than `system_profiler SPUSBDataType`,
-which returns nothing on this machine.
+does not invent them. It tries `ioreg -a` first; macOS 27 currently rejects that mode with
+`can't open file`, so it falls back to the same command's scalar text output. It does not use
+`system_profiler SPUSBDataType`, which returns nothing on this machine.
 
 The tool exists for one moment, so its success path is checkable without one: `--selftest`
 runs the report against a registry built by hand - a P1102 answering with the serial the queue
@@ -430,22 +433,22 @@ $PY scripts/preflight-usb.py --json > /tmp/after.json
 diff /tmp/before.json /tmp/after.json
 ```
 
-With no printer attached it exits 1 and says so, but still reports the CUPS side, which is
-useful on its own:
+If no printer is attached it exits 1 and still reports the CUPS side, which is useful on its
+own. On macOS 27, `ioreg -a` currently fails with `can't open file`; the script falls back to
+the text form of the same registry query and parses the P1102 device and interface nodes:
 
 ```text
   HP_LaserJet_Professional_P1102
     device   usb://Hewlett-Packard/HP%20LaserJet%20Professional%20P1102?serial=000000000Q80E182PR1a
     wants    serial 000000000Q80E182PR1a
-    filter   x86_64   .../hpRaster.bundle/Contents/MacOS/rastertozjs  <- Intel-only, cannot run here
+    filter   x86_64   .../hpRaster.bundle/Contents/MacOS/rastertozjs  <- Intel-only, requires Rosetta
   no USB Printer-class device and no Hewlett-Packard device is attached.
 ```
 
 ### Bring-up with no build and no install
 
-Both blockers on hardware testing - the Xcode licence and the missing printer - are worth
-clearing, but the first test needs neither, because a complete job can be produced without
-compiling and delivered without installing:
+The first bring-up test needs neither a CUPS queue nor the HP filter: a complete job can be
+produced without installing anything and delivered through Apple's own USB backend:
 
 ```bash
 PY=/opt/homebrew/bin/python3.13
@@ -595,7 +598,7 @@ included, was run with the native binary moved aside, and the wasm build carried
 | raster with no pages | filter exits 1, no output |
 | raster truncated mid-page | filter exits 1, naming the page and the shortfall |
 | a hand invocation with fewer than seven arguments, and `--help` | exits 2 with the usage text on stderr, or 0 with it on stdout, and writes no job either way |
-| `PPD` set in the environment, which is how CUPS passes the queue's PPD | the media source becomes the PPD's default (Manual, 4), and an explicit `InputSlot` on the command line still overrides it |
+| `PPD` set in the environment, which is how CUPS passes the queue's PPD | the native default remains the ordinary one-source tray (1), while an explicit `InputSlot=Manual` still selects manual feed (4) |
 
 ### What the rehearsal does not cover, and why
 
@@ -744,9 +747,10 @@ deterministic page -> CUPS raster -> HP rastertozjs -> old-driver-output.bin
 same page          -> CUPS raster -> our encoder      -> new-driver-output.bin
 ```
 
-HP's own `rastertozjs` still cannot be executed here - x86_64, no Rosetta 2, no x86_64 dyld
-shared cache - and running it would need a `libstdc++.6.dylib` that does not exist on this
-machine either. So HP's *bytes* remain uncapturable, and that has not changed.
+HP's own `rastertozjs` can be launched only as an x86_64 translated process. With the same
+31 MB CUPS raster used by the native filter it exits with `SIGSEGV` before producing output,
+so HP's *bytes* remain uncapturable. The open reference implementation remains the runnable
+whole-job oracle, while the HP binary remains a disassembly and strings reference.
 
 What did change is that the reference **implementation** turned out to be buildable here,
 because the toolchain gate is a shim (see the first section). That turned option 3 of the
@@ -866,8 +870,13 @@ node scripts/wasi-run.mjs target/wasm32-wasip1/debug/p1100.wasm test-page square
 cmp /tmp/py.zjs /tmp/native.zjs && cmp /tmp/py.zjs /tmp/wasm.zjs
 ```
 
-What remains unverified about the native path is only what needs the printer: no page has
-ever been sent to one.
+The native path has now been exercised on the attached P1102: direct backend tests accepted
+blank, square, horizontal-line, vertical-line, checker, text, Legal-border and grayscale
+jobs, with and without PJL where tested. A document submitted through the installed native
+queue completed and returned the queue to idle, including the two-bit screening option and a
+two-page duplex request. The remaining hardware observations are physical duplex ordering,
+non-plain media handling, rendered correctness of the optional raw-image layout and
+power-cycle behaviour.
 
 ## Comparing two jobs, old driver against ours
 

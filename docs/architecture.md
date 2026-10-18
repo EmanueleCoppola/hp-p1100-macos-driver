@@ -11,8 +11,10 @@ not sit on something macOS is actively deleting.
 ## The decisive constraint we measured
 
 The blocker that actually killed HP's driver here is the **architecture**. `rastertozjs` is
-x86_64, Rosetta is not installed, and there is no x86_64 dyld shared cache, so the process
-cannot launch at all: `bad CPU type in executable` is what it prints.
+x86_64 and the attached Mac can launch it only through Rosetta translation. A direct
+diagnostic invocation reaches the binary, but feeding it the real CUPS raster ends in
+`SIGSEGV` before it emits a job. The replacement therefore cannot depend on either the Intel
+slice or the translated legacy runtime.
 
 An earlier version of this document gave a second reason that turned out to be wrong. It
 claimed `/usr/lib/libcups.2.dylib` no longer exists, which would make any dependency on the
@@ -160,11 +162,18 @@ as a factor of ten, and the point is to catch that rather than to pin the alloca
 The output was byte-identical before and after that refactor, which is how it was checked.
 
 Streaming has one ordering rule of its own: nothing is written until the **first page has been
-read and validated**. The printer receives bytes as the filter produces them, so a stream that
+read, validated, and encoded**. The printer receives bytes as the filter produces them, so a stream that
 is not a raster at all - the wrong file, or an upstream filter that died before its first page -
-would otherwise leave it holding a PJL prologue and an unfinished document, waiting. Holding one
-page header before starting costs nothing and makes the failure mode "nothing arrives, and CUPS
-reports why".
+would otherwise leave it holding a PJL prologue and an unfinished document, waiting. The
+prologue stays in the encoder's existing buffer until conversion and compression succeed.
+This also covers a valid raster whose screening table or encoding options are invalid.
+
+Raw page payloads and converted bitmap allocations are separately capped at 128 MiB;
+these are host resource limits, not claims about printer capabilities. The reader accepts
+native-endian RaS3 only. Supported input models are chunked, single-channel W/SW at 8 bits
+and K at 1 bit; other models fail explicitly instead of being interpreted with the wrong
+ink polarity. Each encoded page is written directly from the encoder buffer and that
+allocation is reused, avoiding a second full-page output buffer.
 
 
 
@@ -192,19 +201,18 @@ and the layout CUPS applies before rasterising. The comparison is
 `scripts/reference-compare.py`, and what it cannot cover is listed in `docs/differences.md`.
 
 The uncompressed `ZJT_RAW_IMAGE` path is also implemented and selectable with
-`P1100_RAW=1`, because whether the printer accepts it is still an open hardware question
-and it is a useful fallback to have. `p1100-job` prepares the same 1 bpp bitmap either way,
+`P1100_RAW=1`, because its payload interpretation is still an open hardware question
+and it is a useful fallback to have. The attached P1102 accepted a complete raw A4 transfer;
+`p1100-job` prepares the same 1 bpp bitmap either way,
 so choosing between the two encoders touches no other layer.
 
-What remains is therefore hardware validation, not design or implementation:
+The remaining hardware questions are limited to paper handling and the fallback path:
 
-1. Whether the printer accepts our framing, item sets and PJL wrapper at all.
-2. Whether it accepts our JBIG stream. The BIH options, the order, L0 and the adaptive
-   template are all what HP's own encoder is configured with as well as what the reference
-   driver sends (item 2 of `docs/differences.md`), so a rejection here would mean a
-   *printer-specific* constraint rather than an encoder bug.
-3. Whether `ZJT_RAW_IMAGE` works, and whether the 128-pixel-aligned row stride is what it
-   expects.
+1. Whether duplex pages are in the right physical order after the printer's manual-duplex
+   handling.
+2. Whether non-plain media codes produce the expected paper handling.
+3. Whether the accepted `ZJT_RAW_IMAGE` transfer produces the correct page, and whether the
+   128-pixel-aligned row stride is what it expects.
 4. Whether a power cycle needs a host-side firmware download. **LIKELY no**, but unverified.
 
 ## Open items
@@ -212,8 +220,10 @@ What remains is therefore hardware validation, not design or implementation:
 Every known difference from HP's driver, with what would settle each one, is listed in
 docs/differences.md.
 
-- No hardware validation has happened yet: the printer is not attached, so USB identity,
-  endpoint layout, framing acceptance and the raw-image question are all unverified.
+- Hardware validation has confirmed the P1102 USB identity and endpoint layout, accepted
+  compressed jobs with PJL and without PJL, and completed a document through the native CUPS
+  queue. Duplex ordering, non-plain media, raw-image layout and power-cycle behaviour remain
+  unverified.
 - Whether a filter-based queue survives future macOS releases is a migration question
   rather than a design one; the core is positioned so that it does not matter.
 - Whether our *specific* JBIG configuration is accepted by the device's decoder. It is
