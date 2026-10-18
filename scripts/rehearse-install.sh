@@ -12,7 +12,7 @@
 # files, which only the real install provides. Everything else is the same code path install.sh
 # takes, with the same arguments it would be given for real.
 #
-# It also runs the refusals, so the rails around a recursive delete are exercised rather than
+# It also runs the refusals, so destination guards are exercised rather than
 # assumed: an HP or Apple location, /, a relative path, and the system destination without root.
 #
 # Usage:
@@ -22,9 +22,8 @@ set -eu
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 cd "$REPO"
 
-QUEUE=HP_LaserJet_P1100_rehearsal
+QUEUE=HP_LaserJet_P1100_rehearsal_$$
 SYSTEM_DEST=/Library/Printers/p1100
-SOURCE_QUEUE=HP_LaserJet_Professional_P1102
 KEEP=0
 
 while [ $# -gt 0 ]; do
@@ -38,11 +37,31 @@ done
 
 work=$(mktemp -d -t p1100-install-rehearsal)
 DEST="$work/p1100"
+DEST="$(cd -P "$(dirname "$DEST")" && pwd)/$(basename "$DEST")"
 failures=0
+
+snapshot_system_dest() {
+    out=$1
+    if [ ! -e "$SYSTEM_DEST" ]; then
+        printf '%s\n' absent >"$out"
+        return
+    fi
+    {
+        printf '%s\n' present
+        stat -f 'DIR %Su:%Sg %Lp %z' "$SYSTEM_DEST"
+        find "$SYSTEM_DEST" -maxdepth 1 -mindepth 1 -type f -exec shasum -a 256 {} \; | sort
+        find "$SYSTEM_DEST" -maxdepth 1 -mindepth 1 -type d \
+            -exec stat -f 'SUBDIR %N %Su:%Sg %Lp' {} \; | sort
+    } >"$out"
+}
 
 if [ "$KEEP" = 0 ]; then
     trap 'rm -rf "$work"' EXIT INT TERM
 fi
+
+system_before="$work/system-before"
+system_after="$work/system-after"
+snapshot_system_dest "$system_before"
 
 ok() { printf '  %-58s ok\n' "$1"; }
 bad() { printf '  %-58s FAILED: %s\n' "$1" "$2"; failures=$((failures + 1)); }
@@ -54,8 +73,6 @@ echo 'rehearsing the install, into a scratch directory'
 [ -f "$REPO/assets/p1100.icns" ] || {
     echo 'error: build the icon first: scripts/make-icns.py' >&2; exit 2; }
 
-device_before=$(lpstat -v "$SOURCE_QUEUE" 2>/dev/null || true)
-
 # --- the install, with the two arguments that keep it out of everyone's way -------------
 if ! "$REPO/scripts/install.sh" --dest "$DEST" --no-queue --queue "$QUEUE" >"$work/install.log" 2>&1
 then
@@ -65,7 +82,7 @@ then
 fi
 
 # --- what should be there --------------------------------------------------------------
-for f in p1100-filter p1100.ppd p1100.icns; do
+for f in p1100-filter p1100-usbink p1100.ppd p1100.icns; do
     [ -f "$DEST/$f" ] && ok "$f is in the destination" || bad "$f is in the destination" 'missing'
 done
 [ -x "$DEST/p1100-filter" ] && ok 'the installed filter is executable' \
@@ -73,6 +90,11 @@ done
 cmp -s "$DEST/p1100-filter" "$REPO/target/release/p1100-filter" \
     && ok 'the installed filter is the build, byte for byte' \
     || bad 'the installed filter is the build, byte for byte' 'differs'
+[ -x "$DEST/p1100-usbink" ] && ok 'the installed command filter is executable' \
+    || bad 'the installed command filter is executable' 'not executable'
+cmp -s "$DEST/p1100-usbink" "$REPO/target/release/p1100-usbink" \
+    && ok 'the installed command filter is the build, byte for byte' \
+    || bad 'the installed command filter is the build, byte for byte' 'differs'
 cmp -s "$DEST/p1100.icns" "$REPO/assets/p1100.icns" \
     && ok 'the installed icon is the built one' \
     || bad 'the installed icon is the built one' 'differs'
@@ -94,16 +116,20 @@ fi
 grep -q "^\*cupsFilter: \"application/vnd.cups-raster 100 $DEST/p1100-filter\"" "$DEST/p1100.ppd" \
     && ok 'the PPD points its raster filter into the destination' \
     || bad 'the PPD points its raster filter into the destination' 'no such line'
+grep -q "^\*cupsFilter: \"application/vnd.cups-command 100 $DEST/p1100-usbink\"" "$DEST/p1100.ppd" \
+    && ok 'the PPD points its command filter into the destination' \
+    || bad 'the PPD points its command filter into the destination' 'no such line'
 grep -q "^\*APPrinterIconPath: \"$DEST/p1100.icns\"$" "$DEST/p1100.ppd" \
     && ok 'the PPD points its icon into the destination' \
     || bad 'the PPD points its icon into the destination' 'no such line'
 
 # --- what should not have happened ------------------------------------------------------
-[ ! -e "$SYSTEM_DEST" ] && ok "$SYSTEM_DEST was not created" \
-    || bad "$SYSTEM_DEST was not created" 'it exists'
-[ "$(lpstat -v "$SOURCE_QUEUE" 2>/dev/null || true)" = "$device_before" ] \
-    && ok 'the HP queue still points where it did' \
-    || bad 'the HP queue still points where it did' 'the device changed'
+snapshot_system_dest "$system_after"
+if cmp -s "$system_before" "$system_after"; then
+    ok "$SYSTEM_DEST was left unchanged"
+else
+    bad "$SYSTEM_DEST was left unchanged" 'its snapshot changed'
+fi
 if lpstat -p "$QUEUE" >/dev/null 2>&1; then
     bad 'no queue was created' "$QUEUE exists"
 else
