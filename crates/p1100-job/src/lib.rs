@@ -212,7 +212,7 @@ fn is_true(value: &str) -> bool {
 /// | PPD option | values | maps to |
 /// |---|---|---|
 /// | `Duplex` | `None`, `DuplexNoTumble`, `DuplexTumble` | `ZJI_DMDUPLEX` |
-/// | `InputSlot` | `Manual` | `ZJI_DMDEFAULTSOURCE` |
+/// | `InputSlot` | `Manual`, `Upper`, ... | `ZJI_DMDEFAULTSOURCE` |
 /// | `pjlDensity` | 1..5 | the PJL `DENSITY` line |
 /// | `EconoMode` | `True` / `False` | the PJL `ECONOMODE` line and `ZJI_ECONOMODE` |
 /// | `pjlJamRecovery` | `True` / `False` | the PJL `JAMRECOVERY` line |
@@ -283,8 +283,10 @@ fn apply_one_option(opts: &mut Options, key: &str, value: &str) {
 /// we know. Without it, a job that names no options - the common case, since CUPS sends only
 /// what the user changed - would send our defaults rather than the printer's configured ones.
 ///
-/// On this printer that is one item: the PPD's `*DefaultInputSlot` is `Manual`, so the media
-/// source is 4 rather than the 1 we used to assume. The other defaults here agree with ours.
+/// The installed HP PPD declares its only choice as `Manual`, but the P1102's normal paper
+/// tray is the one-source path (1). Treating that PPD marker as a default manual-feed request
+/// puts the physical printer into attention state for an ordinary tray job. Explicit source
+/// choices still override this built-in default below.
 pub fn apply_ppd_defaults(opts: &mut Options, ppd: &str) {
     for line in ppd.lines() {
         let Some(rest) = line.strip_prefix("*Default") else {
@@ -297,7 +299,7 @@ pub fn apply_ppd_defaults(opts: &mut Options, ppd: &str) {
         // resolution - reaches us through the raster page header, which already reflects them.
         if matches!(
             key,
-            "InputSlot" | "Duplex" | "EconoMode" | "pjlDensity" | "pjlJamRecovery" | "p1100Grey"
+            "Duplex" | "EconoMode" | "pjlDensity" | "pjlJamRecovery" | "p1100Grey"
         ) {
             apply_one_option(opts, key, value.trim().trim_matches('"'));
         }
@@ -433,15 +435,10 @@ fn finish_job(enc: &mut Encoder, opts: &Options) {
 }
 
 /// Hand whatever the encoder has accumulated to the writer.
-fn flush_pending<W: Write>(
-    enc: &mut Encoder,
-    pending: &mut Vec<u8>,
-    out: &mut W,
-) -> Result<(), Error> {
-    enc.drain_into(pending);
-    out.write_all(pending)
+fn flush_pending<W: Write>(enc: &mut Encoder, out: &mut W) -> Result<(), Error> {
+    out.write_all(enc.as_bytes())
         .map_err(|e| Error::Io(e.to_string()))?;
-    pending.clear();
+    enc.clear();
     Ok(())
 }
 
@@ -475,7 +472,6 @@ pub fn encode_raster_stream<R: Read, W: Write>(
     opts: &Options,
 ) -> Result<usize, Error> {
     let mut enc = Encoder::new();
-    let mut pending: Vec<u8> = Vec::new();
 
     // Read the first page before writing anything. A stream that is not a raster at all - the
     // wrong file, or an upstream filter that died before its first page - then leaves the
@@ -488,19 +484,20 @@ pub fn encode_raster_stream<R: Read, W: Write>(
     }
 
     start_job(&mut enc, opts);
-    flush_pending(&mut enc, &mut pending, out)?;
+    // Keep the prologue in memory until the first image is encoded too. A valid raster
+    // can still fail conversion (for example a missing/short screening table).
 
     let mut pages = 0usize;
     while let Some(header) = next.take() {
         enc.page_start(&geometry(&header, opts));
         write_image(&mut enc, &header, &pixels, opts)?;
         enc.page_end(opts.duplex);
-        flush_pending(&mut enc, &mut pending, out)?;
+        flush_pending(&mut enc, out)?;
         pages += 1;
         next = stream.next_page(&mut pixels)?;
     }
     finish_job(&mut enc, opts);
-    flush_pending(&mut enc, &mut pending, out)?;
+    flush_pending(&mut enc, out)?;
     out.flush().map_err(|e| Error::Io(e.to_string()))?;
     Ok(pages)
 }
@@ -526,11 +523,20 @@ pub fn encode_bitmap_job(
     paper: u32,
     opts: &Options,
 ) -> Result<Vec<u8>, Error> {
+    let header = bitmap_header(width, height, resolution)?;
+    let expected = header.payload_len()?;
+    if bitmap.len() != expected {
+        return Err(Error::Unsupported(format!(
+            "bitmap must contain exactly {expected} bytes, got {}",
+            bitmap.len()
+        )));
+    }
     let jbig_width = p1100_raster::align128(width);
-    let mut g = PageGeometry::mono(width, height, resolution.max(1));
+    let mut g = PageGeometry::mono(width, height, resolution);
     g.paper = paper;
     g.duplex = opts.duplex;
     g.econo_mode = opts.econo_mode;
+    g.source = opts.source;
     g.ret = true;
     encode_job(opts, |enc| {
         enc.page_start(&g);
@@ -538,6 +544,26 @@ pub fn encode_bitmap_job(
         enc.page_end(opts.duplex);
         Ok(1)
     })
+}
+
+/// Validate generated bitmap geometry before allocating pixels or writing a job.
+pub fn bitmap_header(width: u32, height: u32, resolution: u32) -> Result<PageHeader, Error> {
+    let aligned = width
+        .checked_add(127)
+        .ok_or(RasterError::GeometryOverflow)?
+        & !127;
+    let header = PageHeader {
+        cups_width: width,
+        cups_height: height,
+        hw_resolution: [resolution, resolution],
+        cups_bits_per_color: 1,
+        cups_bits_per_pixel: 1,
+        cups_color_space: p1100_raster::color_space::K,
+        cups_bytes_per_line: aligned / 8,
+        ..PageHeader::default()
+    };
+    p1100_raster::validate_page_header(&header)?;
+    Ok(header)
 }
 
 // ---------------------------------------------------------------------------
@@ -1165,6 +1191,42 @@ mod tests {
     }
 
     #[test]
+    fn bitmap_jobs_validate_geometry_and_length_on_both_encodings() {
+        for encoding in [ImageEncoding::Raw, ImageEncoding::Jbig] {
+            let opts = Options {
+                encoding,
+                source: source::MANUAL,
+                ..Options::default()
+            };
+            for (width, height, dpi, length) in [
+                (0, 1, 600, 16),
+                (u32::MAX, 1, 600, 16),
+                (8, 0, 600, 0),
+                (8, 1, 0, 16),
+                (8, 1, 600, 15),
+                (8, 1, 600, 17),
+                (128, u32::MAX, 600, 16),
+            ] {
+                assert!(encode_bitmap_job(
+                    &vec![0; length],
+                    width,
+                    height,
+                    dpi,
+                    paper::LETTER,
+                    &opts
+                )
+                .is_err());
+            }
+            let job = encode_bitmap_job(&[0; 16], 8, 1, 600, paper::LETTER, &opts).unwrap();
+            let chunks = decode(strip_pjl_framing(&job)).unwrap();
+            assert_eq!(
+                item_value(&chunks[1].items, p1100_protocol::item::DMDEFAULTSOURCE),
+                source::MANUAL
+            );
+        }
+    }
+
+    #[test]
     fn every_page_gets_its_own_start_and_end_page() {
         let r = raster(&[(8, 2, "Letter"), (8, 2, "Letter"), (8, 2, "Letter")]);
         let job = encode_raster_job(&r, &Options::default()).unwrap();
@@ -1288,9 +1350,9 @@ mod tests {
 ";
         let mut o = Options::default();
         apply_ppd_defaults(&mut o, ppd);
-        // Manual is the one that differs from our built-in default, and so the one whose
-        // absence was a real difference from HP's driver.
-        assert_eq!(o.source, source::MANUAL);
+        // The PPD's Manual marker is intentionally ignored as a default: on the P1102 it
+        // requests manual feed and raises the attention light for an ordinary tray job.
+        assert_eq!(o.source, source::ONLY_ONE);
         assert_eq!(o.duplex, zduplex::OFF);
         assert_eq!(o.density, 3);
         assert!(!o.econo_mode);
@@ -1416,6 +1478,99 @@ mod tests {
             "{} bytes were written before the error",
             out.len()
         );
+    }
+
+    #[test]
+    fn first_page_conversion_failure_writes_nothing() {
+        let r = raster(&[(8, 2, "Letter")]);
+        for encoding in [ImageEncoding::Jbig, ImageEncoding::Raw] {
+            let opts = Options {
+                encoding,
+                tone_tables: Some(ToneTables {
+                    at_400: vec![],
+                    at_600: vec![],
+                }),
+                ..Options::default()
+            };
+            let mut out = Vec::new();
+            assert!(encode_raster_stream(&r[..], &mut out, &opts).is_err());
+            assert!(
+                out.is_empty(),
+                "failed image left a partial job on the wire"
+            );
+        }
+    }
+
+    #[test]
+    fn output_handles_short_writes_and_reports_failures() {
+        struct Sink {
+            bytes: Vec<u8>,
+            fail_after: usize,
+            interrupted: bool,
+            zero: bool,
+        }
+        impl Write for Sink {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                if !self.interrupted {
+                    self.interrupted = true;
+                    return Err(std::io::ErrorKind::Interrupted.into());
+                }
+                if self.bytes.len() >= self.fail_after {
+                    return if self.zero {
+                        Ok(0)
+                    } else {
+                        Err(std::io::ErrorKind::BrokenPipe.into())
+                    };
+                }
+                let n = bytes.len().min(3).min(self.fail_after - self.bytes.len());
+                self.bytes.extend_from_slice(&bytes[..n]);
+                Ok(n)
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let r = raster(&[(8, 2, "Letter"), (16, 3, "A4")]);
+        let opts = Options::default();
+        let expected = encode_raster_job(&r, &opts).unwrap();
+        let mut sink = Sink {
+            bytes: vec![],
+            fail_after: usize::MAX,
+            interrupted: false,
+            zero: false,
+        };
+        assert_eq!(encode_raster_stream(&r[..], &mut sink, &opts).unwrap(), 2);
+        assert_eq!(sink.bytes, expected);
+        for zero in [false, true] {
+            let mut sink = Sink {
+                bytes: vec![],
+                fail_after: 40,
+                interrupted: false,
+                zero,
+            };
+            assert!(matches!(
+                encode_raster_stream(&r[..], &mut sink, &opts),
+                Err(Error::Io(_))
+            ));
+            assert_eq!(sink.bytes, expected[..40]);
+        }
+    }
+
+    #[test]
+    fn truncated_second_page_does_not_claim_a_complete_job() {
+        let mut r = raster(&[(8, 2, "Letter"), (16, 3, "A4")]);
+        r.pop();
+        let mut out = Vec::new();
+        assert!(encode_raster_stream(&r[..], &mut out, &Options::default()).is_err());
+        let chunks = decode(strip_pjl_framing(&out)).unwrap();
+        assert_eq!(
+            chunks
+                .iter()
+                .filter(|c| c.header.ty == pop::START_PAGE)
+                .count(),
+            1
+        );
+        assert_eq!(chunks.last().unwrap().header.ty, pop::END_PAGE);
     }
     #[test]
     fn a_corrupt_raster_is_reported_not_guessed() {
