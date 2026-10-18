@@ -20,6 +20,7 @@ SOURCE_QUEUE=HP_LaserJet_Professional_P1102
 DEST=/Library/Printers/p1100
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 FILTER="$REPO/target/release/p1100-filter"
+USBINK="$REPO/target/release/p1100-usbink"
 ICON="$REPO/assets/p1100.icns"
 
 # Apple's /usr/bin/python3 is behind the Xcode licence gate, so picking it blind is what made
@@ -36,6 +37,7 @@ DRY=0
 FORCE=0
 NOQUEUE=0
 DEVICE=
+MARKER=.p1100-installed
 
 usage() {
     cat <<EOF
@@ -135,6 +137,10 @@ check_ppd() {
         || die "the generated PPD does not begin with *PPD-Adobe on line 1"
     grep -q "^\*cupsFilter: \"application/vnd.cups-raster 100 $DEST/p1100-filter\"" "$ppd" \
         || die "the generated PPD does not point its raster filter at $DEST/p1100-filter"
+    grep -q "^\*cupsFilter: \"application/vnd.cups-command 100 $DEST/p1100-usbink\"" "$ppd" \
+        || die "the generated PPD does not point its command filter at $DEST/p1100-usbink"
+    grep -q '^\*cupsCommands: "ReportLevels"' "$ppd" \
+        || die "the generated PPD does not offer ReportLevels"
     # The icon is the one line that names a file of ours outside this check's usual reach, so
     # it is asserted directly: the row would otherwise show HP's picture, or none.
     grep -q "^\*APPrinterIconPath: \"$DEST/p1100.icns\"$" "$ppd" \
@@ -146,7 +152,7 @@ check_ppd() {
     # installation, which cannot run on this machine at all.
     grep -E '^\*cupsFilter:.*(hpRaster\.bundle|/Library/Printers/hp)' "$ppd" \
         && die "the generated PPD still routes a filter into HP's installation"
-    for gone in '^\*cupsCommands' '^\*APPrinterUtilityPath' '^\*cupsFilter: "application/vnd.cups-command'; do
+    for gone in '^\*APPrinterUtilityPath'; do
         grep -q "$gone" "$ppd" && die "the generated PPD still carries a line matching $gone"
     done
 
@@ -197,10 +203,33 @@ check_ppd() {
 # --- safety rails -----------------------------------------------------------
 
 case "$DEST" in
-    */hp|*/hp/*|/Library/Printers/PPDs*|/usr/libexec/cups*|/etc/cups*)
+    */hp|*/hp/*|/Library/Printers/PPDs*|/usr/libexec/cups*|/etc/cups*|/private/etc/cups*|/private/Library/Printers/PPDs*)
         die "refusing to install into $DEST: that is an Apple or HP location" ;;
 esac
 [ -n "$QUEUE" ] || die "empty queue name"
+[ -d "$(dirname "$DEST")" ] || die "parent directory of --dest does not exist"
+case "$(basename "$DEST")" in .|..) die "--dest must name a directory, not . or .." ;; esac
+[ ! -L "$DEST" ] || die "refusing symlink destination: $DEST"
+DEST_PARENT=$(cd -P "$(dirname "$DEST")" && pwd)
+DEST="$DEST_PARENT/$(basename "$DEST")"
+case "$DEST" in
+    */hp|*/hp/*|/Library/Printers/PPDs*|/usr/libexec/cups*|/etc/cups*|/private/etc/cups*|/private/Library/Printers/PPDs*)
+        die "refusing to install into $DEST: that is an Apple or HP location" ;;
+esac
+
+if [ -e "$DEST" ] || [ -L "$DEST" ]; then
+    [ -d "$DEST" ] && [ ! -L "$DEST" ] || die "refusing a non-directory or symlink destination: $DEST"
+    if [ ! -f "$DEST/$MARKER" ] && {
+        [ ! -f "$DEST/p1100-filter" ] || [ ! -f "$DEST/p1100-usbink" ] || [ ! -f "$DEST/p1100.ppd" ] ||
+        ! grep -Fq "*cupsFilter: \"application/vnd.cups-raster 100 $DEST/p1100-filter\"" "$DEST/p1100.ppd";
+    }; then
+        find "$DEST" -mindepth 1 -maxdepth 1 -print -quit | grep -q . \
+            && die "refusing non-empty unowned destination $DEST"
+    fi
+fi
+for f in "$MARKER" p1100-filter p1100-usbink p1100.ppd p1100.icns p1100-400.tones p1100-600.tones; do
+    [ ! -L "$DEST/$f" ] || die "refusing known install file that is a symlink: $DEST/$f"
+done
 
 # Root is what writing under /Library/Printers costs, not what this script costs. --dest points
 # it at a scratch directory instead, which is how scripts/rehearse-install.sh runs every step
@@ -234,6 +263,14 @@ else
     esac
 fi
 
+if [ ! -x "$USBINK" ]; then
+    die "$USBINK not found; build it with scripts/build-native.sh"
+fi
+case "$(/usr/bin/file -b "$USBINK")" in
+    *arm64*) echo "command filter: $USBINK" ;;
+    *) die "$USBINK is not an ARM64 binary" ;;
+esac
+
 # Same treatment for the icon: a real run stops before writing anything, a dry run says so
 # and carries on, because the point of a dry run is to report rather than to fail.
 if [ -f "$ICON" ] && [ -s "$ICON" ]; then
@@ -249,11 +286,11 @@ fi
 
 # --- device URI -------------------------------------------------------------
 
-if [ -z "$DEVICE" ]; then
+if [ "$NOQUEUE" = 0 ] && [ -z "$DEVICE" ]; then
     DEVICE=$(lpstat -v "$SOURCE_QUEUE" 2>/dev/null | sed -n 's/^device for [^:]*: //p')
     [ -n "$DEVICE" ] || die "cannot read the device URI from queue '$SOURCE_QUEUE'; pass --device URI"
 fi
-echo "device: $DEVICE"
+[ "$NOQUEUE" = 1 ] || echo "device: $DEVICE"
 
 # --- PPD source -------------------------------------------------------------
 
@@ -274,11 +311,28 @@ if ! "$PYTHON" -c 'pass' >/dev/null 2>&1; then
 fi
 [ "$PYTHON_OK" = 1 ] || echo "note: '$PYTHON' is not runnable here; PPD generation would fail"
 
+if [ "$NOQUEUE" = 0 ]; then
+    [ "$QUEUE" != "$SOURCE_QUEUE" ] || die "refusing to replace the source HP queue '$SOURCE_QUEUE'"
+    QUEUE_EXISTS=0
+    if lpstat -p "$QUEUE" >/dev/null 2>&1; then
+        QUEUE_EXISTS=1
+        [ "$FORCE" = 1 ] || die "queue '$QUEUE' already exists; use --force only for an installed p1100 queue"
+        queue_ppd=/etc/cups/ppd/$QUEUE.ppd
+        [ -f "$queue_ppd" ] && [ ! -L "$queue_ppd" ] && grep -Fq "*cupsFilter: \"application/vnd.cups-raster 100 $DEST/p1100-filter\"" "$queue_ppd" \
+            || die "refusing to delete unrelated queue '$QUEUE'"
+    fi
+else
+    QUEUE_EXISTS=0
+fi
+
 # --- act --------------------------------------------------------------------
 
 echo
 echo "1. installing the filter, the icon and the PPD into $DEST"
 run mkdir -p "$DEST"
+if [ "$DRY" = 0 ] && [ ! -f "$DEST/$MARKER" ]; then
+    run /usr/bin/install -m 0644 /dev/null "$DEST/$MARKER"
+fi
 # Ownership belongs to the system location. A rehearsal into a scratch directory cannot set it -
 # install(1) refuses - and does not need to, since nothing there is read by the print system.
 OWNER=
@@ -286,6 +340,7 @@ if [ "$SYSTEM" = 1 ]; then
     OWNER="-o root -g wheel"
 fi
 run /usr/bin/install -m 0755 $OWNER "$FILTER" "$DEST/p1100-filter"
+run /usr/bin/install -m 0755 $OWNER "$USBINK" "$DEST/p1100-usbink"
 run /usr/bin/install -m 0644 $OWNER "$ICON" "$DEST/p1100.icns"
 # The two tone tables the two-bit grey screening uses. They are HP data, so the installer
 # reads them out of the HP driver on this machine rather than carrying them here. A machine
@@ -319,13 +374,13 @@ if [ "$DRY" = 1 ]; then
         (
             trap 'rm -f "$probe_ppd"' EXIT
             "$PYTHON" "$REPO/scripts/make-ppd.py" "$SRC_PPD" "$DEST/p1100-filter" "$probe_ppd" \
-                --icon "$DEST/p1100.icns" || exit 1
+                --command-filter "$DEST/p1100-usbink" --icon "$DEST/p1100.icns" || exit 1
             check_ppd "$probe_ppd"
         ) || die "the PPD could not be generated or did not pass its check"
     fi
 else
     run "$PYTHON" "$REPO/scripts/make-ppd.py" "$SRC_PPD" "$DEST/p1100-filter" "$DEST/p1100.ppd" \
-        --icon "$DEST/p1100.icns"
+        --command-filter "$DEST/p1100-usbink" --icon "$DEST/p1100.icns"
     # Before the queue is created, not after: a PPD CUPS cannot use must not reach lpadmin.
     check_ppd "$DEST/p1100.ppd"
 fi
@@ -335,7 +390,7 @@ if [ "$NOQUEUE" = 1 ]; then
     echo "2. no queue: --no-queue was given, so the files are in place and nothing points at them"
 else
     echo "2. creating the queue '$QUEUE'"
-    if [ "$FORCE" = 1 ]; then
+    if [ "$FORCE" = 1 ] && [ "$QUEUE_EXISTS" = 1 ]; then
         run lpadmin -x "$QUEUE" 2>/dev/null || true
     fi
     run lpadmin -p "$QUEUE" -E -v "$DEVICE" -P "$DEST/p1100.ppd"

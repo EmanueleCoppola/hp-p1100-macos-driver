@@ -13,9 +13,8 @@ the source PPD is only read, and the output is a new file.
 Rewritten:
   *cupsFilter: "application/vnd.cups-raster 100 <hp filter>"  -> our filter
   *APPrinterIconPath                                          -> our own .icns, with --icon
-Dropped (no equivalent yet, so CUPS must not try to run them):
-  *cupsFilter lines pointing at a command filter such as HP's usbink
-  *cupsCommands, *APPrinterUtilityPath
+Dropped:
+  *APPrinterUtilityPath
 Relabelled:
   *NickName gains a suffix so the queue is distinguishable in the UI.
 
@@ -31,7 +30,7 @@ built-in conversion rules - a queue that prints the wrong raster rather than ref
 
 Usage:
     python3 scripts/make-ppd.py <source.ppd[.gz]> <filter-path> <out.ppd>
-                                [--suffix " (native ARM64)"] [--icon PATH.icns]
+                                [--command-filter PATH] [--suffix " (native ARM64)"] [--icon PATH.icns]
 """
 
 import gzip
@@ -121,7 +120,7 @@ def screening(langs):
     return lines
 
 
-def rewrite(data, filter_path, suffix, icon_path=None):
+def rewrite(data, filter_path, suffix, icon_path=None, command_filter=None):
     crlf = b'\r\n' in data
     eol = b'\r\n' if crlf else b'\n'
     lines = data.split(b'\n')
@@ -157,6 +156,8 @@ def rewrite(data, filter_path, suffix, icon_path=None):
             continue
 
         if line.startswith('*cupsCommands'):
+            if command_filter:
+                out.append(line)
             continue
         if line.startswith('*APPrinterUtilityPath'):
             continue
@@ -186,7 +187,8 @@ def rewrite(data, filter_path, suffix, icon_path=None):
                         # wiring we just wrote rather than anywhere else.
                         out.append(icon_line)
                         icon_written = True
-                # Otherwise it is a command filter: drop it.
+                if mime == 'application/vnd.cups-command' and command_filter:
+                    out.append('*cupsFilter: "application/vnd.cups-command 100 %s"' % command_filter)
                 continue
             out.append(line)
             continue
@@ -236,12 +238,16 @@ def main(argv):
     if '--icon' in argv:
         icon = argv[argv.index('--icon') + 1]
         args = [a for a in args if a != icon]
+    command_filter = None
+    if '--command-filter' in argv:
+        command_filter = argv[argv.index('--command-filter') + 1]
+        args = [a for a in args if a != command_filter]
     if len(args) != 3:
         print(__doc__)
         return 2
     src, filter_path, dst = args
     data = read_maybe_gz(src)
-    out = rewrite(data, filter_path, suffix, icon)
+    out = rewrite(data, filter_path, suffix, icon, command_filter)
     with open(dst, 'wb') as f:
         f.write(out)
     print('wrote %s (%d bytes) from %s' % (dst, len(out), src))
