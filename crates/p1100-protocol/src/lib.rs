@@ -301,6 +301,14 @@ impl Encoder {
         &self.out
     }
 
+    /// Discard the encoded bytes while retaining the buffer allocation.
+    ///
+    /// This is useful for a streaming caller that writes `as_bytes()` directly and
+    /// then starts the next chunk or page without a second pending buffer.
+    pub fn clear(&mut self) {
+        self.out.clear();
+    }
+
     /// Append raw bytes that are not part of the chunk stream, such as the PJL prologue
     /// and epilogue that wrap it.
     pub fn extend_raw(&mut self, bytes: &[u8]) {
@@ -515,7 +523,7 @@ pub fn decode(stream: &[u8]) -> Result<Vec<DecodedChunk>, DecodeError> {
     let mut pos = 4usize;
     let mut out = Vec::new();
     while pos < stream.len() {
-        if pos + CHUNK_HEADER_LEN > stream.len() {
+        if stream.len() - pos < CHUNK_HEADER_LEN {
             return Err(DecodeError::Truncated);
         }
         let size = be_u32(&stream[pos..])?;
@@ -529,24 +537,30 @@ pub fn decode(stream: &[u8]) -> Result<Vec<DecodedChunk>, DecodeError> {
         if (size as usize) < CHUNK_HEADER_LEN {
             return Err(DecodeError::ChunkSizeTooSmall(size));
         }
-        let end = pos + size as usize;
-        if end > stream.len() {
+        if size as usize > stream.len() - pos {
             return Err(DecodeError::Truncated);
         }
+        let end = pos + size as usize;
         let mut ip = pos + CHUNK_HEADER_LEN;
-        let mut parsed = Vec::with_capacity(items as usize);
+        // Reject impossible counts before parsing and grow only as items are validated.
+        // A tiny malformed chunk must not trigger an allocation based on `items`.
+        let item_capacity = (end - (pos + CHUNK_HEADER_LEN)) / ITEM_HEADER_LEN;
+        if items as usize > item_capacity {
+            return Err(DecodeError::Truncated);
+        }
+        let mut parsed = Vec::new();
         for _ in 0..items {
-            if ip + ITEM_HEADER_LEN > end {
+            if end - ip < ITEM_HEADER_LEN {
                 return Err(DecodeError::Truncated);
             }
             let isize = be_u32(&stream[ip..])?;
             if isize < ITEM_HEADER_LEN as u32 {
                 return Err(DecodeError::ChunkSizeTooSmall(isize));
             }
-            let iend = ip + isize as usize;
-            if iend > end {
+            if isize as usize > end - ip {
                 return Err(DecodeError::Truncated);
             }
+            let iend = ip + isize as usize;
             parsed.push(DecodedItem {
                 size: isize,
                 item: be_u16(&stream[ip + 4..])?,
@@ -613,11 +627,8 @@ pub const UEL: &str = "\u{1b}%-12345X";
 
 /// PJL prologue emitted before the `JZJZ` stream signature.
 ///
-/// Matches the reference framing for this class of host-based models. `timestamp` is passed in
+/// Matches the framing accepted by HP's macOS driver on the P1102. `timestamp` is passed in
 /// rather than read from the clock so the output stays deterministic and testable.
-/// See the note in `docs/protocol.md`: HP's macOS driver uses a slightly different PJL
-/// preamble (`@PJL JOB NAME=`, `@PJL ENTER LANGUAGE=`), so exact PJL text is a
-/// golden-master point of difference rather than something to match byte for byte.
 /// PJL settings for a job, all of which the printer's PPD can influence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PjlSettings<'a> {
@@ -671,13 +682,24 @@ pub fn pjl_prologue(settings: &PjlSettings<'_>) -> Vec<u8> {
     ));
     let mut out = s.into_bytes();
     out.push(0);
-    out.extend_from_slice(UEL.as_bytes());
+    // The P1102 needs the explicit language switch. Ending PJL with a bare UEL makes the USB
+    // backend report success, but the printer can enter attention state and emit a blank page.
+    out.extend_from_slice(b"@PJL ENTER LANGUAGE=ZJS\n");
     out
 }
 
 /// PJL epilogue emitted after `ZJT_END_DOC`.
 pub fn pjl_epilogue() -> Vec<u8> {
     format!("{UEL}@PJL EOJ\n{UEL}").into_bytes()
+}
+
+/// PJL housekeeping sent once the printer has reported the job as printed.
+///
+/// The prologue turns the job, page and device status reports on so the printer can announce
+/// when the sheets are out; this turns them off again. HP's filter writes the same line at the
+/// end of a job, and it keeps one job's status traffic out of the next job's backchannel.
+pub fn pjl_status_off() -> Vec<u8> {
+    format!("{UEL}@PJL USTATUSOFF\n{UEL}").into_bytes()
 }
 
 /// Return the ZjStream body of a job, stripping the PJL prologue and epilogue if present.
@@ -735,7 +757,7 @@ mod pjl_tests {
     use super::*;
 
     #[test]
-    fn prologue_is_uel_delimited_and_nul_terminated() {
+    fn prologue_selects_zjs_after_the_nul_terminated_job_attributes() {
         let p = pjl_prologue(&PjlSettings {
             density: 3,
             econo_mode: false,
@@ -743,15 +765,16 @@ mod pjl_tests {
             timestamp: "20260915120000",
         });
         assert!(p.starts_with(UEL.as_bytes()));
-        assert!(p.ends_with(UEL.as_bytes()));
+        assert!(p.ends_with(b"@PJL ENTER LANGUAGE=ZJS\n"));
         let text = String::from_utf8_lossy(&p);
         assert!(text.contains("@PJL SET DENSITY=3\n"));
         assert!(text.contains("@PJL SET ECONOMODE=OFF\n"));
         assert!(text.contains("@PJL SET JOBATTR=\"JobAttr4=20260915120000\""));
-        // exactly one NUL, right before the trailing UEL
+        assert!(text.contains("@PJL ENTER LANGUAGE=ZJS\n"));
+        // exactly one NUL, right before the language switch
         assert_eq!(p.iter().filter(|b| **b == 0).count(), 1);
         let nul = p.iter().position(|b| *b == 0).unwrap();
-        assert_eq!(&p[nul + 1..], UEL.as_bytes());
+        assert_eq!(&p[nul + 1..], b"@PJL ENTER LANGUAGE=ZJS\n");
     }
 
     #[test]
@@ -782,6 +805,14 @@ mod pjl_tests {
         assert_eq!(
             String::from_utf8(pjl_epilogue()).unwrap(),
             format!("{UEL}@PJL EOJ\n{UEL}")
+        );
+    }
+
+    #[test]
+    fn status_off_is_uel_ustatusoff_uel() {
+        assert_eq!(
+            String::from_utf8(pjl_status_off()).unwrap(),
+            format!("{UEL}@PJL USTATUSOFF\n{UEL}")
         );
     }
 }
@@ -1007,12 +1038,52 @@ mod tests {
     }
 
     #[test]
+    fn clear_reuses_the_encoder_buffer() {
+        let mut enc = Encoder::new();
+        enc.extend_raw(&[0u8; 128]);
+        let capacity = enc.out.capacity();
+
+        enc.clear();
+
+        assert!(enc.as_bytes().is_empty());
+        assert_eq!(enc.out.capacity(), capacity);
+        enc.extend_raw(&[1u8; 128]);
+        assert_eq!(enc.as_bytes(), &[1u8; 128]);
+    }
+
+    #[test]
     fn decode_rejects_a_missing_stream_signature() {
         assert_eq!(
             decode(b"XXXX").unwrap_err(),
             DecodeError::BadStreamSignature
         );
         assert_eq!(decode(b"").unwrap_err(), DecodeError::BadStreamSignature);
+    }
+
+    #[test]
+    fn decode_does_not_reserve_from_an_untrusted_item_count() {
+        let mut malformed = Vec::from(STREAM_SIGNATURE.as_slice());
+        malformed.extend_from_slice(&16u32.to_be_bytes());
+        malformed.extend_from_slice(&op::START_DOC.to_be_bytes());
+        malformed.extend_from_slice(&u32::MAX.to_be_bytes());
+        malformed.extend_from_slice(&0u16.to_be_bytes());
+        malformed.extend_from_slice(&CHUNK_SIGNATURE.to_be_bytes());
+
+        assert_eq!(decode(&malformed).unwrap_err(), DecodeError::Truncated);
+    }
+
+    #[test]
+    fn maximum_lengths_are_rejected_without_wrapping_on_32_bit_targets() {
+        let mut enc = Encoder::new();
+        enc.stream_signature();
+        enc.doc_start(&JobOptions::default());
+        let bytes = enc.into_bytes();
+        let mut bad_chunk = bytes.clone();
+        bad_chunk[4..8].copy_from_slice(&u32::MAX.to_be_bytes());
+        assert_eq!(decode(&bad_chunk).unwrap_err(), DecodeError::Truncated);
+        let mut bad_item = bytes;
+        bad_item[20..24].copy_from_slice(&u32::MAX.to_be_bytes());
+        assert_eq!(decode(&bad_item).unwrap_err(), DecodeError::Truncated);
     }
 
     /// These are what `p1100 zjs-dump` prints when it is pointed at something that is not a
