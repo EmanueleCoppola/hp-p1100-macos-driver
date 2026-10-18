@@ -58,7 +58,7 @@ fn large_raw_raster() -> Vec<u8> {
     };
     let mut data = p1100_raster::SYNC_RASTER3.to_ne_bytes().to_vec();
     data.extend_from_slice(&p1100_raster::encode_page_header(&header));
-    data.extend(std::iter::repeat(255).take(4096 * 1024));
+    data.resize(data.len() + 4096 * 1024, 255);
     data
 }
 
