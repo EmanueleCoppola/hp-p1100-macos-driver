@@ -11,8 +11,8 @@ read-only run and with no privileges, the questions that decide what to do next:
   - do the filters the queue names exist, and can this machine run them at all?
 
 `system_profiler SPUSBDataType` is not used: it returns nothing on this machine.
-`ioreg -a` returns the registry as a plist, which is exact, where the text form
-truncates long values and repeats matched personalities.
+`ioreg -a` normally returns the registry as a plist. On macOS 27 it currently exits
+with "can't open file", so the tool falls back to the scalar fields in the text form.
 
 Run it either side of a power cycle, or around a firmware-upload attempt, and diff the
 JSON dumps to see whether the printer re-enumerates with a different identity:
@@ -40,6 +40,7 @@ import io
 import json
 import os
 import plistlib
+import re
 import shlex
 import subprocess
 import sys
@@ -84,9 +85,17 @@ def usb_devices(source=None):
         tree = plistlib.loads(source)
     else:
         rc, out, err = run(['ioreg', '-r', '-c', 'IOUSBHostDevice', '-l', '-w0', '-a'])
-        if rc != 0 or not out.strip():
-            raise SystemExit('ioreg failed: %s' % (err.strip() or 'no output'))
-        tree = plistlib.loads(out.encode('utf-8'))
+        if rc == 0 and out.strip():
+            tree = plistlib.loads(out.encode('utf-8'))
+        else:
+            # macOS 27 still documents -a, but its ioreg exits with "can't open file".
+            # The text form contains the same scalar properties and remains available, so
+            # parse that form instead of making the first hardware check unusable.
+            rc, out, text_err = run(['ioreg', '-r', '-c', 'IOUSBHostDevice', '-l', '-w0'])
+            if rc != 0 or not out.strip():
+                raise SystemExit('ioreg failed: %s' %
+                                 (text_err.strip() or err.strip() or 'no output'))
+            return usb_devices_from_text(out)
 
     devices = {}
     interfaces = {}
@@ -128,6 +137,78 @@ def usb_devices(source=None):
                 'protocol': i.get('bInterfaceProtocol'),
                 'endpoints': i.get('bNumEndpoints'),
                 'driver': i.get('IOObjectClass'),
+            } for i in interfaces.get(node.get('locationID'), [])],
+        })
+    found.sort(key=lambda d: (d['vid'] or 0, d['pid'] or 0, d['location'] or 0))
+    return found
+
+
+def usb_devices_from_text(raw):
+    """Parse the scalar fields from ioreg's text output on systems where -a is broken."""
+    objects = []
+    current = None
+    header = re.compile(r'^.*\+-o (.*?)\s+<class ([^, >]+).*?\bid (0x[0-9a-fA-F]+)')
+    prop = re.compile(r'"([^"]+)"\s*=\s*(.*)$')
+
+    def scalar(value):
+        value = value.strip()
+        if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
+            return value[1:-1]
+        try:
+            return int(value, 0)
+        except ValueError:
+            return None
+
+    for line in raw.splitlines():
+        match = header.match(line)
+        if match:
+            name, cls, entry_id = match.groups()
+            current = {'IORegistryEntryID': int(entry_id, 16),
+                       'IORegistryEntryName': name,
+                       '_class': cls}
+            objects.append(current)
+            continue
+        if current is None:
+            continue
+        match = prop.search(line)
+        if match:
+            value = scalar(match.group(2))
+            if value is not None:
+                current[match.group(1)] = value
+
+    devices = {}
+    interfaces = {}
+    for obj in objects:
+        cls = obj['_class']
+        if cls == 'IOUSBHostDevice' and 'idVendor' in obj:
+            devices[obj['IORegistryEntryID']] = obj
+        elif cls == 'IOUSBHostInterface' and 'bInterfaceClass' in obj:
+            interfaces.setdefault(obj.get('locationID'), []).append(obj)
+
+    found = []
+    for node in devices.values():
+        found.append({
+            'name': node.get('USB Product Name') or node.get('kUSBProductString')
+                    or node.get('IORegistryEntryName'),
+            'vendor_name': node.get('USB Vendor Name') or node.get('kUSBVendorString'),
+            'vid': node.get('idVendor'),
+            'pid': node.get('idProduct'),
+            'serial': node.get('USB Serial Number') or node.get('bUSB Serial Number'),
+            'bcdUSB': node.get('bcdUSB'),
+            'class': node.get('bDeviceClass'),
+            'subclass': node.get('bDeviceSubClass'),
+            'protocol': node.get('bDeviceProtocol'),
+            'speed': node.get('USBSpeed'),
+            'link_bps': node.get('UsbLinkSpeed'),
+            'location': node.get('locationID'),
+            'entry_id': node['IORegistryEntryID'],
+            'exclusive_owner': node.get('UsbExclusiveOwner'),
+            'interfaces': [{
+                'class': i.get('bInterfaceClass'),
+                'subclass': i.get('bInterfaceSubClass'),
+                'protocol': i.get('bInterfaceProtocol'),
+                'endpoints': i.get('bNumEndpoints'),
+                'driver': i.get('_class'),
             } for i in interfaces.get(node.get('locationID'), [])],
         })
     found.sort(key=lambda d: (d['vid'] or 0, d['pid'] or 0, d['location'] or 0))
@@ -276,7 +357,7 @@ def human(devices, queues, show_all, backend=None):
             if arch == 'missing':
                 note = '  <- missing'
             elif arch and 'arm64' not in arch:
-                note = '  <- Intel-only, cannot run here'
+                note = '  <- Intel-only, requires Rosetta translation'
             print('    filter   %-8s %s%s' % (arch or '?', path, note))
     print()
 
@@ -474,6 +555,32 @@ def selftest():
     report = capture(human, keyboard, queues, False)
     assert 'no USB Printer-class device' in report, report
     checks += 2
+
+    # macOS 27's live fallback is the text form rather than the plist archive. Keep that
+    # parser on the same self-test path, so a future ioreg formatting change fails here.
+    text_dump = '''+-o HP LaserJet Professional P1102@01140000  <class IOUSBHostDevice, id 0x101>
+  | {
+  |   "USB Product Name" = "HP LaserJet Professional P1102"
+  |   "USB Serial Number" = "000000000Q80E182PR1a"
+  |   "idVendor" = 1008
+  |   "idProduct" = 42
+  |   "bDeviceClass" = 0
+  |   "locationID" = 18087936
+  | }
+  | +-o Printer@0  <class IOUSBHostInterface, id 0x102>
+  | | {
+  | |   "bInterfaceClass" = 7
+  | |   "bInterfaceSubClass" = 1
+  | |   "bInterfaceProtocol" = 2
+  | |   "bNumEndpoints" = 2
+  | |   "locationID" = 18087936
+  | | }
+'''
+    parsed = usb_devices_from_text(text_dump)
+    assert len(parsed) == 1 and parsed[0]['serial'] == wanted, parsed
+    assert parsed[0]['interfaces'][0]['class'] == PRINTER_CLASS, parsed
+    assert parsed[0]['interfaces'][0]['endpoints'] == 2, parsed
+    checks += 3
 
     # CUPS's own view of the devices, which the report compares with the registry: a queue
     # can only print if the backend it hands bytes to lists the device its URI names.

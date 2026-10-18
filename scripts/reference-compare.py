@@ -177,9 +177,9 @@ def reference_job(pages, header, flags, work):
     gx = int(round(page[0] * rx / 72.0))
     gy = int(round(page[1] * ry / 72.0))
     code = PAPER_CODES.get(header['page_size_name'])
-    # `-s 4` is the media source this printer's PPD defaults to, which is what the filter reads
-    # out of the file when the job names nothing; the reference takes it as a flag instead.
-    cmd = [ORACLE, '-z2', '-P', '-L0', '-r%dx%d' % (rx, ry), '-g%dx%d' % (gx, gy), '-s', '4']
+    # The native queue uses the P1102's ordinary one-source tray by default. The explicit
+    # manual-feed case below still passes -s 4 through its case flags.
+    cmd = [ORACLE, '-z2', '-P', '-L0', '-r%dx%d' % (rx, ry), '-g%dx%d' % (gx, gy), '-s', '1']
     if code is not None:
         cmd += ['-p', str(code)]
     cmd += flags + paths
@@ -196,10 +196,15 @@ def reference_job(pages, header, flags, work):
 # values differ because the two runs happen at different instants - and because ours is UTC
 # while the reference's is local time, which is recorded in docs/differences.md.
 JOBATTR = re.compile(rb'@PJL SET JOBATTR="JobAttr4=(\d{14})"\x00')
+LANGUAGE_SWITCH = re.compile(rb'(?:\x1b%-12345X|@PJL ENTER LANGUAGE=ZJS\n)JZJZ')
 
 
 def without_timestamp(blob):
-    return JOBATTR.sub(b'', blob)
+    # The hardware P1102 needs the explicit PJL language switch. The foo2zjs reference exits
+    # PJL with UEL before the same JZJZ body, so normalize only that framing difference while
+    # keeping the rest of the wire comparison strict.
+    blob = JOBATTR.sub(b'', blob)
+    return LANGUAGE_SWITCH.sub(b'JZJZ', blob)
 
 
 def assert_bilevel(data, cr, label):
