@@ -129,6 +129,50 @@ raster and protocol, and raster and protocol depend on nothing. That is what let
 layer below the filter be exercised with a printer and a CUPS installation nowhere in
 sight, which is the property that made this testable on this machine at all.
 
+### Module layout
+
+Each crate keeps its `lib.rs` (or its `main.rs`, for the two binaries) to the crate
+docs, the module declarations and the re-exports that make up its API; the work is in the
+modules below, and each module owns one thing.
+
+```text
+p1100-protocol  wire     the format's sizes and signatures
+                op       chunk opcodes
+                item     item tags; item_type, the payload types
+                items    building an item block
+                duplex, paper, source, media   the device code tables
+                page, job        what the caller wants printed
+                encoder          the chunk stream
+                decoder          reading it back, and the opcode names
+                pjl              the PJL framing around it
+p1100-raster    wire     stream sizes, sync words and the resource caps
+                field    the cups_page_header2_t offsets
+                compression, color_space   CUPS's code tables
+                page_header   the header, and the geometry derived from it
+                header        its 1796-byte wire form, both ways
+                validate      the checks every consumer applies
+                reader        pages out of a stream already in memory
+                stream        pages out of a Read, one at a time
+                mono, tone    the 1-bit conversion and HP's two-bit screening
+p1100-jbig      tables   the T.82 probability-state tables
+                qm       the QM arithmetic coder
+                encoder  header, stripes and the context model
+                error    why an image cannot be encoded
+p1100-job       options, ppd     what the caller asked for, and how it is read
+                geometry, paper  a page's items, and the page size code
+                image    one page image: JBIG, or raw
+                job      the chunk sequence, streamed a page at a time
+                bitmap, pattern  the generated-bitmap path and its pages
+                timestamp        the PJL job attribute clock
+p1100-filter    side_channel, completion   the CUPS descriptors, the signals, the wait
+                status                     the printer's PJL status reports
+                options, tones, writer     CUPS's option string, the tone tables, stdout
+                bin/p1100-usbink/{http,usb}   the command filter's HTTP request, and the
+                                             USB paths that carry it (ffi, modern, legacy)
+p1100-cli       raster, job, zjs, send     one module per command family
+```
+
+
 `p1100-usb` does not exist and is not currently needed: Apple's `usb` backend is already
 native, and the filter writes to stdout for CUPS to hand to it.
 
