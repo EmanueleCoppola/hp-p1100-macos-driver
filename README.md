@@ -3,8 +3,9 @@
 A native Apple Silicon replacement for the Intel-only HP driver of the
 **HP LaserJet Professional P1100** family: an open-source macOS driver implementation for
 the HP LaserJet Professional P1100 printer family. Its generic implementation was
-reverse-engineered and tested against an **HP LaserJet Professional P1102**, which is the
-one model it is currently tested on.
+reverse-engineered against the installed driver artifacts and reference encoder for an
+**HP LaserJet Professional P1102**. P1102 is the reference target; its USB transport and
+native CUPS queue were validated on hardware on 2026-09-16.
 
 Status: the existing stack is documented, the printer protocol is understood and
 specified, and a dependency-free Rust stack exists with the raster-to-job pipeline, a JBIG
@@ -15,9 +16,9 @@ geometry, compressed image and padding - for every option combination
 the reference encoder of the standard. The two-bit path HP's own driver uses for this printer is
 built too - its tone tables read out of the installed driver, the screening rule read out of its
 code, and the whole page checked against the reference encoder by `scripts/two-bit-compare.py` -
-behind an option, with the one-bit path still the default. **Nothing has been validated on
-hardware yet** -
-the printer has never been attached during this work.
+behind an option, with the one-bit path still the default. Hardware validation accepted PJL
+and no-PJL jobs through Apple's USB backend and completed a document through the installed
+native CUPS queue; the remaining device questions are recorded in `docs/differences.md`.
 
 ## Models
 
@@ -25,13 +26,13 @@ The family is the series HP's own driver bundle covers with one PPD and one filt
 `hp1100.ppd` declares P1102, P1104, P1106, P1107, P1108 and P1109, and CUPS picks the model
 by matching the attached device's IEEE 1284 identity against those lines. Nothing in the
 pipeline here is tied to one model - the PPD carries the device description, the raster
-header carries the page setup, and the wire format is the same across the series - so
-another model in the family should work.
+header carries the page setup, and the protocol libraries are separate from CUPS.
+That structure permits later model support, but shared HP packaging does not establish
+identical firmware, USB behavior, or capabilities across those models.
 
-**Currently tested on a P1102 only**, and not on hardware at all yet. Every measurement in
-these pages was taken with that model, against the P1100-family PPD and filter bundle HP's
-driver installs; compatibility with the rest of the series is expected rather than
-established.
+**Offline validation targets P1102 only.** Measurements use its PPD and installed HP
+filter bundle; compatibility with other models is unverified. The independent audit,
+fixes, validation results, and remaining release gates are in [docs/audit.md](docs/audit.md).
 
 scripts/make-test-job.py builds complete, reference-correct ZjStream jobs independently of
 the filter, which is useful for bring-up: it can emit either a payload compressed by the
@@ -50,10 +51,11 @@ The queue on this Mac is
     HP_LaserJet_Professional_P1102 -> usb://Hewlett-Packard/HP LaserJet Professional P1102?serial=000000000Q80E182PR1a
 
 and its PPD routes raster data through HP's rastertozjs, with usbink for commands. Both are
-thin x86_64 Mach-O binaries and neither can run here:
+thin x86_64 Mach-O binaries; this project replaces both paths with native ARM64 Rust binaries:
 
-- Rosetta 2 is not installed and there is no x86_64 dyld shared cache (arch -x86_64
-  /usr/bin/true -> "Bad CPU type in executable"), so no x86_64 process can launch at all.
+- Rosetta 2 is available on this Mac (`arch -x86_64 /usr/bin/true` succeeds), so the old
+  filter can be launched only through translation. That still violates the native ARM64
+  requirement and leaves the queue dependent on an obsolete compatibility layer.
 - libstdc++.6.dylib, which rastertozjs also needs, is not present under /usr/lib.
 
 The architecture is the decisive blocker. Being precise about the rest, because an earlier
@@ -282,15 +284,13 @@ The request had eleven phases. Where each one landed, and what its evidence is:
 | 5. firmware handling | `docs/protocol.md` | resolved for this bundle (no firmware blob, none uploaded); the device side needs the printer |
 | 6. design the replacement | `docs/architecture.md` | done: PPD plus filter, chosen explicitly over a Printer Application and re-hosting kept cheap |
 | 7. Rust implementation | `crates/` | done: four pure libraries, a CLI and the filter, no dependencies beyond libSystem |
-| 8. golden-master comparison | `scripts/reference-compare.py` | done in the only form available: 31 cases against the reference driver, since HP's binary cannot run on this Mac |
-| 9. real printer testing | `scripts/make-test-job.py`, `docs/testing.md` | **blocked**: needs the printer attached, and the first test needs no build, no install and no administrator |
-| 10. native ARM64 verification | `scripts/verify-native.sh` | done for the binaries and the chain; the print-time process check needs a print |
-| 11. installation | `scripts/install.sh`, `scripts/uninstall.sh` | done, with a dry run that checks the PPD it would install - the diff against HP's, CUPS's own conformance test, and `scripts/ppd-compare.py`, which drives cupsfilter with that PPD and requires the same raster as HP's byte for byte - and `scripts/rehearse-install.sh`, which executes every step except lpadmin into a scratch directory; the sudo install itself is what remains |
+| 8. golden-master comparison | `scripts/reference-compare.py` | 31 cases against the open reference; HP's translated filter emits only a partial prologue and aborts on the current CUPS raster |
+| 9. real printer testing | `scripts/make-test-job.py`, `docs/testing.md` | done for USB identity, deterministic raster patterns, compressed JBIG jobs, PJL/no-PJL framing, raw transfer and the native CUPS queue; physical duplex order, media rendering and power-cycle checks remain |
+| 10. native ARM64 verification | `scripts/verify-native.sh` | done for the binaries and the native queue; the post-print process check found no p1100/rastertozjs/usbink helper running |
+| 11. installation | `scripts/install.sh`, `scripts/uninstall.sh` | done: the privileged install created the side-by-side queue, strict cupstestppd passed, and the rehearsal executes the reversible file path in a scratch directory |
 
-Phase 9 is the one that is blocked outright, and it needs the printer. Phases 5, 10 and 11 each
-have a part that only a print or a `sudo` install can complete. Nothing else is deferred, and
-nothing is deferred to a *later* design decision: the parts that wait are all observations of one
-device.
+Phase 9 now has hardware evidence. The remaining items are deliberately limited to behaviours
+that require observing the printer's paper handling or a power cycle.
 
 ## What is verified, and what is not
 
@@ -380,42 +380,26 @@ Verified by execution, on real captured data where it matters:
 
 Not verified:
 
-- Anything requiring the printer: USB identity, endpoint layout, whether the framing and
-  the uncompressed image are accepted, whether duplex needs host-side page handling, and
-  whether a power cycle needs a firmware download.
-- Whether the printer acts on the media type codes other than plain paper, and whether it
-  accepts the JBIG configuration (which is HP's own, item 2, as well as the reference
-  driver's). Both are in `docs/differences.md` with what settles them.
+- Duplex ordering, non-plain media codes, the uncompressed image layout and power-cycle
+  firmware behaviour remain unverified on the printer.
+- Whether the printer acts on non-plain media codes, keeps duplex pages in the expected
+  physical order, accepts the raw-image fallback and needs firmware after a power cycle.
 
-## Blockers that need the user
+## Remaining gates
 
-1. **Hardware.** The P1102 is not attached, so USB descriptors and on-printer behaviour
-   cannot be observed. This is the one that matters: every remaining question is about what
-   the printer accepts.
-2. **Administrator access, to install.** Writing to /Library/Printers and creating a queue
-   needs sudo - though the first hardware test does not, since Apple's `usb` backend can be
-   run directly. The build itself needs nothing beyond scripts/build-native.sh.
-3. Optional, and only a convenience: sudo xcodebuild-license accept restores the `/usr/bin`
+1. Duplex ordering, non-plain media handling, raw-image compatibility and power-cycle
+   firmware behaviour need further physical observations.
+2. Optional, and only a convenience: sudo xcodebuild-license accept restores the `/usr/bin`
    shims and `brew`. Nothing here depends on it any more - the toolchain's own binaries are
    called directly - but it is the supported route, and the build says which one it used.
 
 ## Next steps
 
-1. Attach the P1102 and run `scripts/preflight-usb.py`. It reports VID/PID, serial,
-   interface class and endpoint count, checks the serial against the one the queue asks
-   for, and - by diffing two `--json` runs across a power cycle - whether the device
-   re-enumerates with a different identity.
-2. Send a minimal page. `scripts/make-test-job.py` writes a complete job whose payload the
-   reference encoder produced, and Apple's own `usb` backend takes it from there - no build,
-   no install and **no administrator**, because a backend is an ordinary executable that
-   reads its device URI from the environment. If the page does not print, the next question
-   is the wrapper: `P1100_NO_PJL=1`, or `make-test-job.py --no-pjl`, sends the same payload
-   without it. A raw queue, with `sudo`, then tests those same bytes through CUPS's own chain
-   rather than around it. Both recipes are in docs/testing.md.
-3. If the compressed image is rejected, `P1100_RAW=1` switches the filter to the
+1. Run the duplex, media and power-cycle recipes in `docs/testing.md` while the P1102 is
+   attached.
+2. If the compressed image ever proves unsuitable, `P1100_RAW=1` switches the filter to the
    uncompressed ZJT_RAW_IMAGE form, whose layout is the one thing here with no independent
    confirmation.
-4. Then install the queue with `sudo ./scripts/install.sh` and print through it.
 
 ## Safety
 

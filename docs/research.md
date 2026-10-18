@@ -151,16 +151,21 @@ Resolved since this list was first written:
    26.x, and a filter based on a PPD still runs. The architecture decision and its
    migration trigger are in `docs/architecture.md`.
 
-Still open, and all blocked on hardware or on further implementation:
+Still open, with the remaining items requiring a power-cycle observation or a deliberate
+feature decision:
 
-4. P1102 USB vendor/product id and interface class. **UNKNOWN** until the printer is
-   attached.
+4. **Resolved on hardware:** the attached P1102 reports USB VID/PID `03f0:002a`, USB 2.0
+   High Speed, a Printer-class interface `7/1/2` with two endpoints, and a separate vendor
+   interface `255/2/16` named HP EWS with three endpoints. The exact endpoint addresses and
+   packet sizes are not exposed by the macOS `ioreg` report used here and remain **UNKNOWN**.
 5. Whether the P1102 needs a host-side firmware download after power-on. **LIKELY no** - no
-   firmware blob ships in its bundle - but unverified.
-6. Whether the printer accepts `ZJT_RAW_IMAGE`. If it does, no JBIG encoder is needed at
-   all.
-7. The JBIG encoder itself. The format is now documented in `docs/jbig.md` and a
-   byte-exact oracle exists, so this is an implementation task rather than a research one.
+   firmware blob ships in its bundle. The compressed path printed through the attached
+   device, but a power cycle has not yet been observed, so this remains **UNKNOWN**.
+6. Whether the printer accepts `ZJT_RAW_IMAGE`. A complete 4,145,016-byte raw A4 job was
+   accepted by Apple's USB backend; whether the printer renders its image correctly remains
+   **UNKNOWN**.
+7. **Resolved:** the JBIG encoder is implemented in Rust and is byte-identical to jbigkit
+   for the supported configuration; the sweep and embedded vectors cover it.
 8. Whether the JBIG and arithmetic-coding patent caveats in the JBIG licence text still
    apply. Those patents date from the 1980s-90s and are **LIKELY** expired, but that
    should be confirmed before shipping an encoder rather than assumed.

@@ -111,7 +111,7 @@ CoreFoundation.
 | cgpdftopdf | libcups.2, CoreGraphics, AppKit, ApplicationServices, CoreText, libobjc |
 | cgpdftops | libcups.2, ApplicationServices, QuartzFilters, ColorSync, CoreGraphics, CoreText, libobjc |
 | backend/usb | libcups.2, IOKit, SystemConfiguration, Security, libresolv.9, libiconv.2, libz.1 |
-| HP rastertozjs | **libcups.2, libcupsimage.2, libstdc++.6**, Foundation, Accelerate, libobjc |
+| HP rastertozjs | **libcups.2, libcupsimage.2, libstdc++.6**, libSystem |
 | HP usbink | libcups.2, IOKit, AppKit, Foundation, libobjc |
 | our p1100-filter | **only `/usr/lib/libSystem.B.dylib`** |
 
@@ -122,7 +122,9 @@ independence rather than a necessity - see docs/architecture.md, which records t
 and wrong claim that libcups was missing.
 
 **Only the HP filters need libstdc++.6.dylib**, which is the one library in this list that is
-not on disk. Combined with their x86_64-only architecture, they cannot run here.
+not visible as a standalone file on disk. Combined with their x86_64-only architecture, they
+require Rosetta translation; the old raster filter still crashes on the current CUPS raster
+before completing a job.
 
 **Ours links one library.** Read with the same tool as the rest of this table, both of our
 binaries load only `/usr/lib/libSystem.B.dylib` - no libcups, no frameworks, no private
@@ -149,8 +151,9 @@ comparison. Done with scripts/macho.py, so no Apple tooling was needed: 13,561 f
 | **arm64-capable** | **0** |
 
 **Not one binary in the HP installation contains an ARM64 slice.** So the compatibility
-warning is not about a stray component: the whole stack HP shipped predates Apple Silicon,
-and with Rosetta absent nothing in it can run here.
+warning is not about a stray component: the whole stack HP shipped predates Apple Silicon.
+Rosetta is available on this Mac and can launch the old filters in translation, but that is
+precisely the dependency the replacement removes.
 
 The sweep also covers the directories Phase 1 asked for specifically:
 
@@ -172,15 +175,20 @@ Apple's side of the chain is already universal, which is why only the filter sta
 replacing.
 
 
-## The stack is already non-functional on this Mac (CONFIRMED)
+## The stack is not a native or reliable path on this Mac (CONFIRMED)
 
-This is more severe than "will stop working in a future release": it cannot run now.
+The failure is already observable on this Mac, rather than being only a future compatibility
+warning.
 
-1. **Rosetta 2 is not installed.**
-   `arch -x86_64 /usr/bin/true` -> `Bad CPU type in executable`; `sysctl.proc_translated` = 0;
-   the only Rosetta component present is `/Library/Apple/usr/libexec/oah/RosettaLinux`.
-   There is no x86_64 dyld shared cache — only `dyld_shared_cache_arm64e*`.
-2. **`libstdc++.6.dylib` is not present on disk**, and `rastertozjs` needs it. The other two
+1. **Rosetta 2 is installed and active as a compatibility facility.**
+   `arch -x86_64 /usr/bin/true` succeeds, and a no-argument diagnostic invocation of HP's
+   `rastertozjs` reaches its usage message under translation. This does not make the HP path
+   native or future-proof.
+2. **The translated HP filter is not a usable golden-master executable here.**
+   With the real CUPS raster as input and the normal CUPS environment, it terminates with
+   `SIGSEGV` before writing a ZjStream job. The exact failure is OS/runtime compatibility;
+   the binary is still useful for strings, symbols and disassembly.
+3. **`libstdc++.6.dylib` is not present on disk**, and `rastertozjs` declares it. The other two
    HP-era dependencies are **not** missing, which an earlier version of this document
    claimed wrongly. Apple's own `cgpdftoraster`, `cgpdftopdf`, `cgpdftops` and the `usb`
    backend all link `/usr/lib/libcups.2.dylib` and run on this machine, so dyld resolves it
@@ -193,14 +201,16 @@ This is more severe than "will stop working in a future release": it cannot run 
    /usr/lib/libstdc++.6.dylib     -> not under /usr/lib
    ```
 
-   Executing the filter directly yields `bad CPU type in executable`, which is the decisive
-   failure: there is no x86_64 runtime for it to use.
+   Executing the filter through `arch -x86_64` reaches the program, but the CUPS-raster run
+   described above crashes before producing output.
 
 Consequences for the plan:
 
-- A PPD queue that points at `rastertozjs` will fail at the filter stage.
-- A golden master cannot be captured *from HP's filter* on this machine, because it cannot
-  be executed here. That is not the same as having no reference: the open driver that
+- A PPD queue that points at `rastertozjs` depends on Rosetta and is not reliable on this
+  macOS/runtime combination.
+- A golden master cannot be captured *from HP's filter* on this machine, because its
+  translated execution aborts before completing a job. That is not the same as having no
+  reference: the open driver that
   supports this printer **can** be built and run here, and `scripts/reference-compare.py`
   uses it to hold the whole job to byte identity. What HP's binary could not be run for, it
   was still read for: its disassembly is where the BIH defaults and the PJL literal list in

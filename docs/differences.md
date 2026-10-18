@@ -42,16 +42,16 @@ fixture with grey in it would silently compare our thresholding against itself, 
 now refuses to run one. The grey path is item 11, and what settles it is an observation rather
 than this comparison.
 
-## 1. The PJL wrapper follows the reference, not HP. CONFIRMED difference, low risk
+## 1. The PJL wrapper follows HP's language switch. CONFIRMED on the P1102
 
-HP's filter emits `@PJL JOB NAME=...`, `@PJL ENTER LANGUAGE=...` and `@PJL EOJ`. We emit the
-wrapper used by the open reference implementation, which is `@PJL JOB`, has no
-`ENTER LANGUAGE` line, and adds `@PJL SET JOBATTR=...`.
+HP's filter emits `@PJL JOB NAME=...`, `@PJL ENTER LANGUAGE=ZJS` and `@PJL EOJ`. The native
+filter keeps the reference implementation's `@PJL JOB` and `JOBATTR` setup, but now emits the
+same explicit `ENTER LANGUAGE=ZJS` switch required by the attached P1102.
 
-Why: HP's binary cannot be executed on this machine, so its exact byte output cannot be
-captured, while the reference implementation is verified on this printer family and is
-therefore the safer model. The risk it carries is specific and worth naming: **if the
-printer requires `ENTER LANGUAGE` to switch into ZjStream, it would ignore the whole job.**
+Why: HP's binary can only be launched under Rosetta on this machine, and feeding it the real
+CUPS raster ends in `SIGSEGV` before it emits bytes. The attached P1102 then provided the
+missing discriminator: the old reference framing was accepted by USB but produced a blank
+page and attention state, while adding `ENTER LANGUAGE=ZJS` printed `TEST 123`.
 A raw-queue test distinguishes that from an image problem, because the same test can send a
 job whose compressed image is known-good.
 
@@ -91,12 +91,9 @@ also why the driver's strings carry the *option names* `cupsPJL`, `pjlDensity`,
 `RET=MEDIUM` or `USTATUS TIMED` literal anywhere in it, so the three lines the reference adds
 and HP does not have are exactly those.
 
-So the two wrappers differ in both directions, and we follow the reference in both: no
-`JOB NAME`, no `ENTER LANGUAGE`, no `EOJ`, plus `ECONOMODE`, `RET=MEDIUM`, `USTATUS TIMED`
-and the `JOBATTR` line. The one-line discriminator, if a hardware test ever needs it, is
-that the reference's payload can be sent with and without its wrapper (`P1100_NO_PJL=1`),
-which separates "the printer rejects our framing or image" from "the printer wants a
-different wrapper".
+The native wrapper still differs from HP in job naming, `EOJ`, and the extra status/settings
+lines, but it now uses the language switch that the hardware visibly requires. The same test
+page that previously produced a blank sheet printed `TEST 123` after this change.
 
 The rest of the wrapper we emit matches HP's in substance: density, econo mode, jam
 recovery, resolution enhancement, and the unsolicited status requests are all the same
@@ -158,28 +155,20 @@ Independently of the reference: the image decodes back to exactly the bitmap the
 describes, using the standard's own decoder, and the encoder reproduces the reference
 encoder's bytes for the same bitmap in both supported configurations.
 
-## 4. The command path is not implemented. CONFIRMED gap
+## 4. The command path is implemented. CONFIRMED
 
-HP's PPD routes `application/vnd.cups-command` to `usbink`, which answers `ReportLevels` by
-opening the printer over USB with IOKit and reading its status. Our generated PPD drops
-that line and `*cupsCommands`, so **the supplies/clean items that HP's driver provided are
-gone** for this queue.
+The generated PPD keeps `*cupsCommands: "ReportLevels"` and routes
+`application/vnd.cups-command` to `p1100-usbink`, a native ARM64 Rust command filter. It
+locates the attached P1102's USB EWS interface by product name, serial number, and interface
+class `ff/02/10`, then uses macOS's IOKit interface client to send
+`GET /DevMgmt/ConsumableConfigDyn.xml HTTP/1.1\r\n\r\n` through its bulk pipes.
 
-What `usbink` actually does is now known, and it is worth recording because it changes what
-"restoring it" would mean. It does **not** speak PJL and does **not** use the CUPS
-backchannel: it carries a hand-rolled HTTP client and sends
-`GET /DevMgmt/ConsumableConfigDyn.xml HTTP/1.1\r\n\r\n` over the USB interface it opened,
-then reports the level as `ATTR: marker-...` plus a
-`<dd:ConsumablePercentageLevelRemaining>` element. The full evidence is in
-`docs/protocol.md`; the short version is that the binary contains no networking symbols at
-all, so the request must travel over the bulk pipes.
-
-Why we do not do that: it means writing an IOKit client and a second transport for a
-device's embedded web server, in a stack whose point is to keep the transport Apple already
-ships - and for printing it changes nothing. The two mechanisms this document used to
-propose (PJL over the CUPS backchannel) would have been a different protocol from the one
-the printer actually answers, which is the kind of plausible-looking substitute this
-project is trying not to ship.
+The filter uses `IOUSBHost` for direct invocations and the IOKit legacy interface client when
+it is launched by CUPS; the latter matches HP's original transport and avoids a macOS crash in
+`IOUSBLib` under cupsd. The reply is HTTP with chunked transfer encoding. The filter reconstructs its XML, extracts
+`<dd:ConsumablePercentageLevelRemaining>`, and emits CUPS marker attributes. A hardware run
+against the attached P1102 returned `marker-levels=20` for the black toner. This is direct USB
+EWS communication; it does not use PJL or CUPS's printer backchannel.
 
 One nuance, because it is where a future implementation should start if this is ever built:
 CUPS gives a filter two different ways to reach the device, and the SDK's headers keep them
@@ -261,10 +250,12 @@ its own idea of page order, which for a flip-the-stack flow is document order. T
 declares no `*cupsManualDuplex`, so CUPS is not splitting the job either. We send document
 order, which is what both facts point at.
 
-Settled by one two-sided test, with two specific things to look for: does the printer prompt,
-and do the sheets come back in the right order? Simplex printing is unaffected either way, and
-the comparison harness deliberately keeps no duplex case: the reference reorders pages by
-construction, so comparing against it there would fail for a reason that is not ours.
+The two-page `DuplexNoTumble` job was accepted and eventually completed as CUPS job 404 after
+the printer-side wait, but the prompt and the physical sheet order were not observed in the
+session. The protocol's duplex ordering therefore remains UNKNOWN. Simplex printing is
+unaffected either way, and the comparison harness deliberately keeps no duplex case: the
+reference reorders pages by construction, so comparing against it there would fail for a
+reason that is not ours.
 
 ## 6. Media type codes are HP's own. The path to the item is checked; the printer's side is not
 
@@ -294,9 +285,9 @@ So the path is now measured rather than asserted, in two places:
 | every declared choice is forwarded | `scripts/rehearse-job.py` sweeps all sixteen choices of the installed PPD, patching each code into a small page cut out of a real raster and checking `ZJI_DMMEDIATYPE` in the job the real filter binary produces |
 
 What remains unverified is the printer's side: whether it acts on 282, 283, 260 or 512-516 the
-way this PPD implies, or wants the Windows `DMMEDIA` values instead. Nothing on this machine
-can answer that. A non-plain-paper job on the attached printer is the test, and the last table
-in this document says what a failure would look like.
+way this PPD implies, or wants the Windows `DMMEDIA` values instead. The native queue has not
+yet run a non-plain-paper job; the last table in this document says what a failure would look
+like.
 
 ## 7. Job timestamps. Cosmetic, on a different clock basis
 
@@ -359,25 +350,19 @@ same job to this filter: CUPS's page-setup filter has already done the rotation.
 
 ## 10. Options a job does not name now come from the PPD. CONFIRMED
 
-Three defaults disagree, and all three are defensible on a printer with one tray: ours is 1
-("only one"), the reference driver's is 7 (auto), and the PPD's own default - which HP's
-filter reads out of the PPD with `ppdMarkDefaults` and `ppdFindMarkedChoice`, both visible in
-its imports - is `*DefaultInputSlot: Manual`, i.e. 4.
+The reference driver's default is 7 (auto), our built-in default is 1 (only one), and the
+installed PPD labels its only source `Manual`, i.e. 4. On the attached P1102 that PPD marker
+triggers manual-feed attention for an ordinary tray job, so the native filter keeps source 1
+unless the user explicitly selects `InputSlot=Manual`.
 
-CUPS's own manual settles it, and not in our favour. filter(7) says that "options passed on
-the command-line typically do not include the default choices [of] the printer's PPD file",
-and it tells a filter to take them from the file - which CUPS hands it in `PPD` - through
-`ppdMarkDefaults` and `ppdFindMarkedChoice`, the two functions HP's driver imports. So the
-command line is not carrying the defaults, and a job that named no options sent our 1 where
-HP sends the PPD's 4.
+CUPS's manual says that options passed on the command line typically omit the PPD's default
+choices, which is why the filter reads the file through `PPD`. The native queue makes one
+deliberate hardware-specific exception for the PPD's misleading `Manual` source marker.
 
-That is now fixed rather than documented. The filter reads the PPD's defaults for the five
-options it maps - media source, duplex, econo mode, density, jam recovery - and then lets the
-command line override them, which is the order the interface describes. On this printer it
-changes exactly one item, `ZJI_DMDEFAULTSOURCE`, from 1 to 4 by default. A PPD that cannot be
-read is not fatal: the built-in defaults stand, as they did before. Unit tests cover the
-reading, and the rehearsal checks the real PPD - with `PPD` set and no options the page carries
-4, and with `InputSlot=Upper` on the command line it carries 1 again.
+The filter still reads the PPD defaults for duplex, econo mode, density, jam recovery and
+screening, then lets the command line override them. It deliberately skips only the PPD's
+`InputSlot=Manual` default, leaving the built-in source 1; an explicit `InputSlot=Manual`
+still carries source 4. Unit tests and the rehearsal cover both paths.
 
 Page size, media type and resolution need none of this: the raster page header already reflects
 the PPD's defaults for those, which is where the interface says a raster filter should look.
@@ -392,11 +377,10 @@ them onto PPD options - which is what HP's driver does, since it imports `ppdMar
   for `Duplex`, `media-source` for `InputSlot`. The filter accepts both spellings of duplex,
   and a unit test pins that down, because accepting only the PPD one would silently ignore a
   two-sided request.
-- `media-source` cannot change anything on this printer, and that is a property of the file
-  rather than a guess: this PPD declares exactly one `InputSlot` choice, `Manual`, so CUPS's
-  own mapping has no other choice to select and a job that asks for a different source leaves
-  the file's default in place - which is precisely what the filter does with a key it does not
-  recognise. For HP's custom options (`pjlDensity`, `pjlJamRecovery`, `EconoMode`) the IPP
+- `media-source` cannot change the installed PPD's displayed source choice, which is a property
+  of the file rather than a guess: it declares exactly one `InputSlot` choice, `Manual`. The
+  native default nevertheless uses source 1, while an explicit `InputSlot=Manual` remains
+  source 4. For HP's custom options (`pjlDensity`, `pjlJamRecovery`, `EconoMode`) the IPP
   attribute name *is* the PPD option name, which is why reading the PPD names works at all.
 
 The check that no option can be accepted and ignored is `scripts/rehearse-job.py`, which reads
@@ -474,18 +458,19 @@ That marker also picks the table: `ToneTables::for_page` takes the 400 dpi cell 
 above says HP does with it, and the job layer tests both halves: the page marked 401 comes out
 exactly as it would with the 400 dpi table in both slots.
 
-The framing is what needs the printer. HP's page items come from `zcups::Formatter::startPage`,
-which takes the depth as its third argument and reads a `bitsPerPixel` property, and whether
-plane records are written at all is behind three `zjs::BandWriter` flags - `sendPlaneItem`,
-`sendStartPlaneChunk` and `sendEndPlaneChunk` - which are what a two-bit implementation has to
-settle. The tone tables are HP's own data, so a legitimate implementation reads them out of the
-user's installed driver: `scripts/hp-tone-table.py --out DIR` writes them. And a wrong two-bit
-framing would stop the queue printing, where a wrong tone curve only looks wrong, which is why
-the threshold stays until there is a device to try it on.
+The framing has now crossed the printer path: the native queue completed job 403 with
+`p1100Grey=Screened2`, including the two plane records. HP's page items come from
+`zcups::Formatter::startPage`, which takes the depth as its third argument and reads a
+`bitsPerPixel` property, and whether plane records are written at all is behind three
+`zjs::BandWriter` flags - `sendPlaneItem`, `sendStartPlaneChunk` and `sendEndPlaneChunk` -
+which are what a two-bit implementation has to settle. The tone tables are HP's own data, so
+a legitimate implementation reads them out of the user's installed driver:
+`scripts/hp-tone-table.py --out DIR` writes them. The transfer is accepted; the threshold
+remains the default until the printed grey quality is compared with HP's output.
 
 So the compression is verified here and the conversion is written and checked against the
-tables, the page items follow from the depth, and only the framing's acceptance waits for the
-printer.
+tables, the page items follow from the depth, and the two-bit framing is accepted by the
+attached printer. Only the visual comparison waits for human inspection.
 
 One observation settles whether the two-bit difference matters in practice: print a graded fill
 or antialiased text and compare it with the same page through HP's queue while that still runs.
@@ -495,19 +480,45 @@ bi-level page screens to itself: the tables take grey 0 to level 0 and grey 255 
 one-bit job and a two-bit job of the same document are the same page and the difference between
 them is the depth and nothing else.
 
+## 12. The job now ends when the printer says the page is out. CONFIRMED in the reference
+
+With HP's driver, a job sits in Print Center until the sheet has been printed; the native
+filter used to end the job as soon as the bytes had been handed to the USB backend, so the row
+disappeared while the printer was still working. The reference filter does not do that: at the
+end of a job it writes `@PJL EOJ`, joins its backchannel reader, and only then sends
+`@PJL USTATUSOFF` and exits, waiting for the printer's `USTATUS JOB` `END`. CUPS keeps a job
+open while one of its filters is still running, which is why that wait is what the row in the
+print dialog measures. `docs/protocol.md` has the disassembly evidence.
+
+The native filter now follows the same sequence, with one addition the reference does not
+need: because a filter that waits can hold a queue open, the wait is bounded. It gives up
+after 30 seconds if the printer has said nothing at all about the job, after 90 seconds
+between pages - the timed device reports the prologue also asks for do not count as news -
+and after five minutes in total. The job then ends with a `WARNING:` rather than disappearing
+quietly. The filter also writes nothing after the job: HP sends `@PJL USTATUSOFF` there, but
+that opens a second PJL session after the job and is not worth the risk on a printer that is
+already waiting.
+
+`crates/p1100-filter/tests/process.rs` covers it without a printer: the test hands the filter
+fd 3 as a socket pair, asserts the process is still running after the job bytes have been
+written, that a job start is not an end, and that the `USTATUS JOB` `END` is what lets it
+finish. The physical question - whether the row now survives until the paper comes out - is
+the one thing this needs the attached printer for.
+
 ## What settles the unverified items
 
 Each one maps to an observation the hardware test makes:
 
 | item | what to look for |
 |---|---|
-| 1, PJL wrapper | if nothing prints at all, this is the first suspect; resending the same payload with `P1100_NO_PJL=1` separates a wrapper problem from an image problem |
+| 1, PJL wrapper | both PJL and no-PJL A4 jobs were accepted with final back-channel responses; visual output remains a separate observation |
 | 2, JBIG configuration | settled, and not a suspect: the options, the order, L0 and the adaptive template all match what HP's encoder is configured with, and the compressed image is byte-identical to the reference's. A corrupt or truncated page would point at the framing or at the printer's own decoder |
-| 4, command path | absent supplies reporting is visible in the print dialog, not in printing |
-| 5, duplex | send a two-page job with `Duplex=DuplexNoTumble`: the printer should prompt to flip the stack ("press the Go button"), and the back of each sheet should be the right way up, which CUPS's rotation has already arranged. Single-sided output with no prompt would mean the job needs host-side page *pairing*, not rotation |
+| 4, command path | settled on hardware: the command filter answers `ReportLevels` and the print dialog's Supply Levels tab shows the printer's own percentage instead of "Information Not Available" |
+| 5, duplex | job 404 completed after the printer-side wait; inspect the prompt and physical sheet order on a future run to settle whether host-side pairing is needed |
 | 6, media codes | whether a non-plain-paper job prints correctly, or jams or misfeeds |
-| 10, media source | settled: the PPD's default is read and an explicit `InputSlot` overrides it. If a job ever prints one page and then waits for paper, the code it sends is DMBIN 4 (manual feed, the PPD's default) |
-| 11, grey conversion | print a graded fill or antialiased text: ours sends one bit per pixel thresholded at 128 where HP's driver would have sent two bits from a 12x12 tone table, so expect harder edges from us. HP's queue can be used for the comparison while it still exists |
+| 10, media source | settled on hardware: the PPD's `Manual` marker caused attention for ordinary jobs, so the native default is DMBIN 1 and explicit `InputSlot=Manual` remains DMBIN 4 |
+| 11, grey conversion | job 403 with `p1100Grey=Screened2` completed through CUPS; visual tone/edge quality still needs inspection against HP's queue |
+| 12, job completion | that the row in Print Center stays until the sheet is out, and that a printer which reports nothing still ends the job, after the 90-second silence warning |
 
 Everything else that used to be listed as uncertain - the wrapper text, the item sets and
 their order, the page geometry, the JBIG configuration, the compressed image, the chunk
