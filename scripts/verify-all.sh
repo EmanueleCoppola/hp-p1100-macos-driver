@@ -86,10 +86,11 @@ run 'peak memory does not grow with the job' "$PY" scripts/memory-check.py
 # PYTHON is passed on: without it install.sh would fall back to Apple's gated /usr/bin/python3,
 # skip the PPD it is supposed to generate and check, and this line would report ok for a check
 # that never ran.
-run 'PPD the installer would write' env PYTHON="$PY" ./scripts/install.sh --dry-run
+run 'PPD the installer would write' env PYTHON="$PY" ./scripts/install.sh --dry-run --no-queue
 run 'PPD the installer writes, through CUPS' "$PY" scripts/ppd-compare.py
 run 'install and uninstall, in a scratch directory' ./scripts/rehearse-install.sh
 run 'uninstall, dry run' ./scripts/uninstall.sh --dry-run
+run 'script guard regressions' ./scripts/test-script-guards.sh
 echo
 echo 'the scripts themselves:'
 # Every script has to parse, including the ones nothing above calls.

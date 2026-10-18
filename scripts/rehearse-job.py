@@ -183,9 +183,10 @@ def check_levers(raster_path, options, work, zc):
     lines.append('P1100_ECONOMODE=1: the page item and the PJL line both say so')
     lines.append('P1100_RAW=1: covered by the payload check when the rehearsal runs --raw')
 
-    # CUPS hands a filter the queue's PPD in PPD and sends only the options the job named, so
-    # the filter is expected to take the rest from the file. On this printer the visible one is
-    # the media source: the PPD's default is Manual (4) where our built-in default is 1.
+    # CUPS hands a filter the queue's PPD in PPD and sends only the options the job named. The
+    # installed HP PPD labels its only source Manual, but the native queue deliberately treats
+    # that marker as the P1102's ordinary one-source tray (1); explicit InputSlot=Manual still
+    # selects manual feed.
     if os.path.exists(PPD):
         items = {}
         for kind, event in zc.semantic_view(job_with({'PPD': PPD}, 'ppd-defaults'))['events']:
@@ -193,11 +194,11 @@ def check_levers(raster_path, options, work, zc):
                 items = event['items']
                 break
         got = str(items.get('DMDEFAULTSOURCE')).split()[0]
-        if got != '4':
-            raise Lever('with PPD set, the media source should be the PPD default (Manual, 4), '
-                        'but the job has %r' % items.get('DMDEFAULTSOURCE'))
-        lines.append('PPD: the file\'s own default media source (Manual, 4) is used when the '
-                     'command line says nothing')
+        if got != '1':
+            raise Lever('with PPD set, the native default media source should be the one-source '
+                        'tray (1), but the job has %r' % items.get('DMDEFAULTSOURCE'))
+        lines.append('PPD: the native default uses the one-source tray (1); explicit manual '
+                     'feed remains available through InputSlot=Manual')
     return lines
 
 

@@ -3,8 +3,8 @@
 #
 # Why this exists: the P1102 is supported by foo2zjs, so a job built by it is the closest
 # thing to a working driver's output that can be produced on this machine - HP's own filter
-# is x86_64 and cannot run here at all. scripts/reference-compare.py uses this to check our
-# job against it byte for byte.
+# is x86_64, requires translation, and crashes on this macOS/CUPS raster before completing a
+# job. scripts/reference-compare.py uses this to check our job against it byte for byte.
 #
 # foo2zjs is GPL-2.0. It is fetched, built and run out of a cache directory and is never
 # committed, linked or shipped from this repository, exactly like the jbigkit bottle that

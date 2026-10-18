@@ -6,6 +6,9 @@ bi-level image entity is byte-for-byte the reference encoder's, in both the conf
 we ship (options 0x5c) and the plain one (options 0), which takes the other template and
 skips typical prediction.
 
+The prototype is tested at both option sets; the shipped Rust CLI is also tested on every
+bi-level case at its production settings and 128-pixel alignment.
+
 The cases are chosen to hit the parts that are easy to get wrong: blank and solid images,
 uniform noise (worst case for an arithmetic coder), single rows and columns, odd widths,
 exact stripe boundaries, and widths either side of the 128-pixel alignment.
@@ -18,14 +21,19 @@ Usage:
 import argparse
 import os
 import random
+import runpy
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
 
+import cupsraster as cr
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ORACLE = os.path.join(HERE, 'jbig-oracle.sh')
 PROTOTYPE = os.path.join(HERE, 'jbig-encode.py')
+CLI = os.path.join(os.path.dirname(HERE), 'target/release/p1100')
 
 OPTIONS = (0x5C, 0x00)
 # Multi-plane pages use the configuration the reference encoder picks for them: options
@@ -51,6 +59,42 @@ def rows_of(width, height, ink):
                 row[x >> 3] |= 0x80 >> (x & 7)
         out.append(row)
     return out
+
+
+def check_rust(work, width, height, rows):
+    """Compare production Rust bytes to jbigkit, using independently packed K1 input."""
+    raster = os.path.join(work, 'rust.raster')
+    job = os.path.join(work, 'rust.zjs')
+    pbm = os.path.join(work, 'aligned.pbm')
+    ref = os.path.join(work, 'aligned.jbg')
+    header = bytearray(cr.PAGE_HEADER_LEN)
+    stride = (width + 7) // 8
+    fields = {cr.HW_RESOLUTION: 600, cr.HW_RESOLUTION + 4: 600,
+              cr.NUM_COPIES: 1, cr.CUPS_WIDTH: width, cr.CUPS_HEIGHT: height,
+              cr.CUPS_BITS_PER_COLOR: 1, cr.CUPS_BITS_PER_PIXEL: 1,
+              cr.CUPS_BYTES_PER_LINE: stride, cr.CUPS_COLOR_SPACE: 3,
+              cr.CUPS_NUM_COLORS: 1}
+    for offset, value in fields.items():
+        struct.pack_into('=I', header, offset, value)
+    with open(raster, 'wb') as f:
+        f.write(struct.pack('=I', cr.SYNC_RASTER3))
+        f.write(header)
+        for row in rows:
+            f.write(row)
+    aligned = (width + 127) & ~127
+    write_pbm(pbm, aligned, height,
+              [bytes(row) + bytes(aligned // 8 - stride) for row in rows])
+    subprocess.run([CLI, 'raster-to-zjs', raster, job, '--no-pjl'],
+                   check=True, stderr=subprocess.DEVNULL)
+    subprocess.run([ORACLE, 'encode', pbm, ref], check=True)
+    parse = runpy.run_path(os.path.join(HERE, 'zjs-compare.py'))['parse_chunks']
+    chunks = parse(open(job, 'rb').read())
+    encoded = b''.join(c['payload'] for c in chunks if c['type'] in (4, 5))
+    expected = open(ref, 'rb').read()
+    # ZjStream adds sixteen zero bytes plus up to three bytes of alignment to the final BID.
+    return (encoded[:len(expected)] == expected
+            and 16 <= len(encoded) - len(expected) <= 19
+            and not any(encoded[len(expected):]))
 
 
 def write_pgm(path, width, height, rows, maxval=3):
@@ -108,6 +152,9 @@ def main(argv):
     ap.add_argument('--verbose', action='store_true', help='print every comparison')
     args = ap.parse_args(argv)
 
+    if not os.path.isfile(CLI):
+        raise SystemExit('build the Rust CLI first: scripts/build-native.sh')
+
     probe = subprocess.run([ORACLE, 'which'], stdout=subprocess.PIPE)
     if not os.path.exists(os.path.join(probe.stdout.decode().strip(), 'jbigkit')):
         raise SystemExit('fetch the oracle first: scripts/jbig-oracle.sh fetch')
@@ -116,6 +163,9 @@ def main(argv):
     checked = 0
     failures = []
     for name, width, height, rows in cases():
+        checked += 1
+        if not check_rust(work, width, height, rows):
+            failures.append('%s: shipped Rust encoder differs from jbigkit' % name)
         pbm = os.path.join(work, 'case.pbm')
         write_pbm(pbm, width, height, rows)
         for options in OPTIONS:
