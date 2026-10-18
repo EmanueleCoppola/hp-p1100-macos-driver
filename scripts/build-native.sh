@@ -30,7 +30,6 @@ REPO=$(cd "$(dirname "$0")/.." && pwd)
 PROFILE=--release
 REFRESH=0
 STATUS_ONLY=0
-EXTRA=
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -38,7 +37,7 @@ while [ $# -gt 0 ]; do
         --release) PROFILE=--release ;;
         --refresh-stub) REFRESH=1 ;;
         --status) STATUS_ONLY=1 ;;
-        --) shift; EXTRA="$*"; break ;;
+        --) shift; break ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
     shift
@@ -53,9 +52,11 @@ if [ -z "$PYTHON" ]; then
     done
 fi
 
-SR=$(/Users/manu/.cargo/bin/rustc --print sysroot 2>/dev/null || rustc --print sysroot)
-CARGO=${CARGO:-/Users/manu/.cargo/bin/cargo}
-command -v "$CARGO" >/dev/null 2>&1 || CARGO=cargo
+RUSTC=${RUSTC:-$(command -v rustc 2>/dev/null || true)}
+CARGO=${CARGO:-$(command -v cargo 2>/dev/null || true)}
+[ -n "$RUSTC" ] || { echo 'error: rustc not found; set RUSTC=/path/to/rustc' >&2; exit 1; }
+[ -n "$CARGO" ] || { echo 'error: cargo not found; set CARGO=/path/to/cargo' >&2; exit 1; }
+SR=$("$RUSTC" --print sysroot)
 
 # Is Apple's linker usable? The licence check prints a message but still exits 0, so test the
 # output rather than the status.
@@ -68,7 +69,7 @@ if [ "$LICENCE_OK" = 1 ]; then
     echo "route: Apple's toolchain (the Xcode licence is accepted)"
     [ "$STATUS_ONLY" = 1 ] && exit 0
     cd "$REPO"
-    exec "$CARGO" build $PROFILE --offline $EXTRA
+    exec "$CARGO" build $PROFILE --offline "$@"
 fi
 
 # The gate is in the /usr/bin shims, not in Xcode's own binaries: calling the toolchain's
@@ -106,7 +107,7 @@ if [ -n "$DIRECT_CLANG" ] && DIRECT_SDK=$(find_sdk); then
     # directly keeps the build quiet and does not depend on the licence either way.
     SDKROOT=$DIRECT_SDK
     export SDKROOT
-    exec "$CARGO" build $PROFILE --offline $EXTRA
+    exec "$CARGO" build $PROFILE --offline "$@"
 fi
 
 echo "route: rust-lld with a rewritten stub SDK"
@@ -128,4 +129,4 @@ fi
 cd "$REPO"
 RUSTFLAGS="-Clinker=$SR/lib/rustlib/aarch64-apple-darwin/bin/rust-lld -Clink-arg=-syslibroot -Clink-arg=$STUB"
 export RUSTFLAGS
-exec "$CARGO" build $PROFILE --offline $EXTRA
+exec "$CARGO" build $PROFILE --offline "$@"
