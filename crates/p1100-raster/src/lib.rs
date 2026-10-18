@@ -38,6 +38,11 @@ pub const SYNC_APPLE: u32 = 0x5545_4952;
 
 /// `sizeof(cups_page_header2_t)` as measured against CUPS's current definition.
 pub const PAGE_HEADER_LEN: usize = 1796;
+/// Maximum raw pixel payload accepted for one page as a resource safety bound, not a printer limit.
+pub const MAX_PAGE_PAYLOAD: usize = 128 * 1024 * 1024;
+/// Maximum allocated bitmap size for one conversion (two planes count together). This is a
+/// resource safety bound, not a printer limit.
+pub const MAX_BITMAP_PAYLOAD: usize = 128 * 1024 * 1024;
 
 /// `offsetof()` values into `cups_page_header2_t`.
 pub mod field {
@@ -138,8 +143,17 @@ pub struct PageHeader {
 
 impl PageHeader {
     /// Total bytes of pixel data this header accounts for.
-    pub fn payload_len(&self) -> usize {
-        self.cups_bytes_per_line as usize * self.cups_height as usize
+    pub fn payload_len(&self) -> Result<usize, RasterError> {
+        let size = (self.cups_bytes_per_line as usize)
+            .checked_mul(self.cups_height as usize)
+            .ok_or(RasterError::GeometryOverflow)?;
+        if size > MAX_PAGE_PAYLOAD {
+            return Err(RasterError::PayloadTooLarge {
+                size,
+                max: MAX_PAGE_PAYLOAD,
+            });
+        }
+        Ok(size)
     }
 
     /// Bytes per row for the 1-bit image handed to the printer.
@@ -156,6 +170,28 @@ impl PageHeader {
     /// encoder's `RASTER_X` item keeps the true width.
     pub fn jbig_width(&self) -> u32 {
         align128(self.cups_width)
+    }
+
+    /// Bytes allocated for one converted 1-bit bitmap.
+    pub fn bitmap_len(&self) -> Result<usize, RasterError> {
+        if self.cups_width > u32::MAX - 127 {
+            return Err(RasterError::BadGeometry {
+                width: self.cups_width,
+                height: self.cups_height,
+                bytes_per_line: self.cups_bytes_per_line,
+            });
+        }
+        let size = self
+            .mono_row_bytes()
+            .checked_mul(self.cups_height as usize)
+            .ok_or(RasterError::GeometryOverflow)?;
+        if size > MAX_BITMAP_PAYLOAD {
+            return Err(RasterError::BitmapTooLarge {
+                size,
+                max: MAX_BITMAP_PAYLOAD,
+            });
+        }
+        Ok(size)
     }
 }
 
@@ -225,6 +261,26 @@ pub enum RasterError {
         height: u32,
         bytes_per_line: u32,
     },
+    PayloadTooLarge {
+        size: usize,
+        max: usize,
+    },
+    BitmapTooLarge {
+        size: usize,
+        max: usize,
+    },
+    GeometryOverflow,
+    UnsupportedColorSpace(u32),
+    UnsupportedColorOrder(u32),
+    UnsupportedColorModel {
+        bits_per_color: u32,
+        bits_per_pixel: u32,
+        num_colors: u32,
+    },
+    ShortPixels {
+        expected: usize,
+        got: usize,
+    },
 }
 
 impl std::fmt::Display for RasterError {
@@ -261,6 +317,22 @@ impl std::fmt::Display for RasterError {
                 f,
                 "implausible raster geometry: {width}x{height} px, {bytes_per_line} bytes per line"
             ),
+            RasterError::PayloadTooLarge { size, max } => {
+                write!(f, "raster page payload is {size} bytes; maximum is {max}")
+            }
+            RasterError::BitmapTooLarge { size, max } => {
+                write!(f, "converted bitmap is {size} bytes; maximum is {max}")
+            }
+            RasterError::GeometryOverflow => write!(f, "raster page geometry overflows usize"),
+            RasterError::UnsupportedColorSpace(v) => write!(f, "unsupported raster color space: {v}"),
+            RasterError::UnsupportedColorOrder(v) => write!(f, "unsupported raster color order: {v}"),
+            RasterError::UnsupportedColorModel { bits_per_color, bits_per_pixel, num_colors } => write!(
+                f,
+                "unsupported raster color model: {bits_per_color} bits/color, {bits_per_pixel} bits/pixel, {num_colors} colors"
+            ),
+            RasterError::ShortPixels { expected, got } => {
+                write!(f, "converter needs {expected} pixel bytes but got {got}")
+            }
         }
     }
 }
@@ -310,7 +382,7 @@ impl<'a> RasterReader<'a> {
         let header = parse_header(&self.data[self.pos..hdr_end]);
 
         validate_page_header(&header)?;
-        let payload_len = header.payload_len();
+        let payload_len = header.payload_len()?;
         let payload_end = hdr_end + payload_len;
         if payload_end > self.data.len() {
             return Err(RasterError::GeometryMismatch {
@@ -326,7 +398,7 @@ impl<'a> RasterReader<'a> {
     }
 }
 
-/// The page-level checks both readers apply before handing a page on.
+/// The page-level checks both readers and direct bitmap converters apply before handing a page on.
 ///
 /// cupsCompression is deliberately not one of them. It is only ever populated from the
 /// PostScript page device dictionary (cups/raster-interpret.c) and libcups never consults it
@@ -334,15 +406,56 @@ impl<'a> RasterReader<'a> {
 /// cgpdftoraster output carries 401 here, which is not a CUPS compression code at all, so
 /// trusting it would reject valid jobs. The byte count is the real check, and the pixel
 /// conversion fails loudly on a depth it cannot handle.
-fn validate_page_header(header: &PageHeader) -> Result<(), RasterError> {
-    if header.cups_width == 0 || header.cups_height == 0 || header.cups_bytes_per_line == 0 {
+pub fn validate_page_header(header: &PageHeader) -> Result<(), RasterError> {
+    if header.cups_width == 0
+        || header.cups_height == 0
+        || header.cups_bytes_per_line == 0
+        || header.hw_resolution[0] == 0
+        || header.hw_resolution[1] == 0
+    {
         return Err(RasterError::BadGeometry {
             width: header.cups_width,
             height: header.cups_height,
             bytes_per_line: header.cups_bytes_per_line,
         });
     }
-    let min_line = (header.cups_width as usize * header.cups_bits_per_pixel as usize).div_ceil(8);
+    if !matches!(header.cups_bits_per_pixel, 1 | 8) {
+        return Err(RasterError::UnsupportedDepth(header.cups_bits_per_pixel));
+    }
+    let supported_model = (matches!(header.cups_color_space, color_space::W | color_space::SW)
+        && header.cups_bits_per_pixel == 8)
+        || (header.cups_color_space == color_space::K && header.cups_bits_per_pixel == 1);
+    if !supported_model {
+        if !matches!(header.cups_color_space, color_space::W | color_space::K) {
+            return Err(RasterError::UnsupportedColorSpace(header.cups_color_space));
+        }
+        return Err(RasterError::UnsupportedColorModel {
+            bits_per_color: header.cups_bits_per_color,
+            bits_per_pixel: header.cups_bits_per_pixel,
+            num_colors: header.cups_num_colors,
+        });
+    }
+    if header.cups_color_order != 0 {
+        return Err(RasterError::UnsupportedColorOrder(header.cups_color_order));
+    }
+    if header.cups_bits_per_color != header.cups_bits_per_pixel || header.cups_num_colors != 1 {
+        return Err(RasterError::UnsupportedColorModel {
+            bits_per_color: header.cups_bits_per_color,
+            bits_per_pixel: header.cups_bits_per_pixel,
+            num_colors: header.cups_num_colors,
+        });
+    }
+    if header.cups_width > u32::MAX - 127 {
+        return Err(RasterError::BadGeometry {
+            width: header.cups_width,
+            height: header.cups_height,
+            bytes_per_line: header.cups_bytes_per_line,
+        });
+    }
+    let min_line = (header.cups_width as usize)
+        .checked_mul(header.cups_bits_per_pixel as usize)
+        .ok_or(RasterError::GeometryOverflow)?
+        .div_ceil(8);
     if (header.cups_bytes_per_line as usize) < min_line {
         return Err(RasterError::BadGeometry {
             width: header.cups_width,
@@ -350,9 +463,7 @@ fn validate_page_header(header: &PageHeader) -> Result<(), RasterError> {
             bytes_per_line: header.cups_bytes_per_line,
         });
     }
-    if !matches!(header.cups_bits_per_pixel, 1 | 2 | 4 | 8) {
-        return Err(RasterError::UnsupportedDepth(header.cups_bits_per_pixel));
-    }
+    header.payload_len()?;
     Ok(())
 }
 
@@ -423,7 +534,7 @@ impl<R: Read> RasterStream<R> {
 
         let header = parse_header(&self.header);
         validate_page_header(&header)?;
-        let payload_len = header.payload_len();
+        let payload_len = header.payload_len()?;
         payload.clear();
         payload.resize(payload_len, 0);
         let got = read_full(&mut self.inner, payload)?;
@@ -623,14 +734,32 @@ pub fn to_two_bit_planes(
             got: table.len(),
         });
     }
+    validate_page_header(header)?;
     if header.cups_bits_per_pixel != 8 {
         return Err(RasterError::UnsupportedDepth(header.cups_bits_per_pixel));
+    }
+    let bitmap_len = header.bitmap_len()?;
+    let expected = header.payload_len()?;
+    if pixels.len() < expected {
+        return Err(RasterError::ShortPixels {
+            expected,
+            got: pixels.len(),
+        });
     }
     let w = header.cups_width as usize;
     let h = header.cups_height as usize;
     let stride = header.mono_row_bytes();
     let src_stride = header.cups_bytes_per_line as usize;
-    let mut planes = [vec![0u8; stride * h], vec![0u8; stride * h]];
+    let total = bitmap_len
+        .checked_mul(2)
+        .ok_or(RasterError::GeometryOverflow)?;
+    if total > MAX_BITMAP_PAYLOAD {
+        return Err(RasterError::BitmapTooLarge {
+            size: total,
+            max: MAX_BITMAP_PAYLOAD,
+        });
+    }
+    let mut planes = [vec![0u8; bitmap_len], vec![0u8; bitmap_len]];
     for y in 0..h {
         let src = &pixels[y * src_stride..];
         for x in 0..w {
@@ -660,11 +789,20 @@ pub fn to_two_bit_planes(
 /// `cups_width`, whether it is padding inside the last used byte or whole padding bytes from a
 /// padded `cups_bytes_per_line`, is left out of the bitmap rather than printed in the margin.
 pub fn to_mono1(header: &PageHeader, pixels: &[u8], threshold: u8) -> Result<Vec<u8>, RasterError> {
+    validate_page_header(header)?;
+    let bitmap_len = header.bitmap_len()?;
+    let expected = header.payload_len()?;
+    if pixels.len() < expected {
+        return Err(RasterError::ShortPixels {
+            expected,
+            got: pixels.len(),
+        });
+    }
     let w = header.cups_width as usize;
     let h = header.cups_height as usize;
     let stride = header.mono_row_bytes();
     let src_stride = header.cups_bytes_per_line as usize;
-    let mut out = vec![0u8; stride * h];
+    let mut out = vec![0u8; bitmap_len];
     match header.cups_bits_per_pixel {
         8 => {
             for y in 0..h {
@@ -682,12 +820,12 @@ pub fn to_mono1(header: &PageHeader, pixels: &[u8], threshold: u8) -> Result<Vec
             // producer that leaves them set must not print a row of dots in the right margin.
             // CUPS pads 1-bit rows out to four bytes, so there is normally padding to be
             // careful about, both whole bytes and the tail of the last used one.
-            let page_bytes = (w + 7) / 8;
+            let page_bytes = w.div_ceil(8);
             let copy = page_bytes.min(src_stride).min(stride);
             for y in 0..h {
                 let src = &pixels[y * src_stride..y * src_stride + copy];
                 out[y * stride..y * stride + copy].copy_from_slice(src);
-                if w % 8 != 0 && copy == page_bytes {
+                if w & 7 != 0 && copy == page_bytes {
                     out[y * stride + copy - 1] &= !(0xFFu8 >> (w % 8));
                 }
             }
@@ -941,6 +1079,38 @@ mod tests {
     }
 
     #[test]
+    fn the_streaming_reader_handles_short_and_interrupted_reads() {
+        struct Chunked {
+            data: Vec<u8>,
+            pos: usize,
+            interrupted: bool,
+        }
+        impl Read for Chunked {
+            fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+                if !self.interrupted {
+                    self.interrupted = true;
+                    return Err(std::io::ErrorKind::Interrupted.into());
+                }
+                let n = out.len().min(3).min(self.data.len() - self.pos);
+                out[..n].copy_from_slice(&self.data[self.pos..self.pos + n]);
+                self.pos += n;
+                Ok(n)
+            }
+        }
+        let h = header(8, 2, 8, 8, "Letter");
+        let data = stream_pages(&[(&h, &[0u8; 16])]);
+        let mut stream = RasterStream::new(Chunked {
+            data,
+            pos: 0,
+            interrupted: false,
+        });
+        let mut payload = Vec::new();
+        assert!(stream.next_page(&mut payload).unwrap().is_some());
+        assert_eq!(payload, vec![0; 16]);
+        assert!(stream.next_page(&mut payload).unwrap().is_none());
+    }
+
+    #[test]
     fn the_streaming_reader_rejects_an_empty_or_misidentified_stream() {
         let empty: Vec<u8> = Vec::new();
         let mut stream = RasterStream::new(&empty[..]);
@@ -972,7 +1142,7 @@ mod tests {
         let h = letter_mono_header(4900, 6400);
         assert_eq!(h.mono_row_bytes(), 624);
         assert_eq!(h.jbig_width(), 4992);
-        assert_eq!(h.payload_len(), 31_360_000);
+        assert_eq!(h.payload_len().unwrap(), 31_360_000);
     }
 
     #[test]
@@ -993,6 +1163,7 @@ mod tests {
         let mut h = letter_mono_header(8, 1);
         h.cups_bits_per_color = 1;
         h.cups_bits_per_pixel = 1;
+        h.cups_color_space = color_space::K;
         h.cups_bytes_per_line = 1;
         let mono = to_mono1(&h, &[0b1010_0000], DEFAULT_THRESHOLD).unwrap();
         assert_eq!(mono.len(), 16);
@@ -1072,6 +1243,7 @@ mod tests {
         let mut h = letter_mono_header(12, 1);
         h.cups_bits_per_color = 1;
         h.cups_bits_per_pixel = 1;
+        h.cups_color_space = color_space::K;
         h.cups_bytes_per_line = 4;
         // Twelve page bits: eight in the first byte and the top nibble of the second. The rest
         // of the second byte, and the two whole bytes after it, are padding and set to ink.
@@ -1098,5 +1270,85 @@ mod tests {
         assert_eq!(mono.len(), 32);
         assert_eq!(mono[0], 0b1000_0000);
         assert_eq!(mono[16], 0b0000_0001);
+    }
+
+    #[test]
+    fn rejects_a_page_that_would_exceed_the_payload_limit() {
+        let h = header(8, 2, u32::MAX, 8, "Letter");
+        let s = stream_pages(&[(&h, &[])]);
+        let mut r = RasterReader::new(&s);
+        assert!(matches!(
+            r.next_page().unwrap_err(),
+            RasterError::PayloadTooLarge { .. } | RasterError::GeometryOverflow
+        ));
+    }
+
+    #[test]
+    fn checks_payload_multiplication_before_the_limit() {
+        let h = PageHeader {
+            cups_bytes_per_line: u32::MAX,
+            cups_height: u32::MAX,
+            ..PageHeader::default()
+        };
+        assert!(matches!(
+            h.payload_len(),
+            Err(RasterError::PayloadTooLarge { .. }) | Err(RasterError::GeometryOverflow)
+        ));
+    }
+
+    #[test]
+    fn direct_converters_reject_short_pixel_buffers() {
+        let h = letter_mono_header(8, 2);
+        assert_eq!(
+            to_mono1(&h, &[0u8; 8], DEFAULT_THRESHOLD).unwrap_err(),
+            RasterError::ShortPixels {
+                expected: 16,
+                got: 8
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_non_grayscale_or_non_chunked_headers() {
+        let mut h = letter_mono_header(8, 1);
+        h.cups_color_space = color_space::RGB;
+        assert!(matches!(
+            validate_page_header(&h),
+            Err(RasterError::UnsupportedColorSpace(_))
+        ));
+        h.cups_color_space = color_space::W;
+        h.cups_color_order = 1;
+        assert!(matches!(
+            validate_page_header(&h),
+            Err(RasterError::UnsupportedColorOrder(_))
+        ));
+    }
+
+    #[test]
+    fn accepts_screened_grayscale_and_rejects_unsupported_depth_models() {
+        let mut h = letter_mono_header(8, 1);
+        h.cups_color_space = color_space::SW;
+        assert!(validate_page_header(&h).is_ok());
+        h.cups_color_space = color_space::W;
+        h.cups_bits_per_pixel = 1;
+        h.cups_bits_per_color = 1;
+        assert!(matches!(
+            validate_page_header(&h),
+            Err(RasterError::UnsupportedColorModel { .. })
+        ));
+    }
+
+    #[test]
+    fn checks_aligned_bitmap_size_before_converter_allocation() {
+        let h = PageHeader {
+            cups_width: 1,
+            cups_height: MAX_PAGE_PAYLOAD as u32,
+            cups_bytes_per_line: 1,
+            ..PageHeader::default()
+        };
+        assert!(matches!(
+            h.bitmap_len(),
+            Err(RasterError::BitmapTooLarge { .. }) | Err(RasterError::GeometryOverflow)
+        ));
     }
 }

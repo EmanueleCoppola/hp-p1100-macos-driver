@@ -24,7 +24,7 @@
 //! The probability table is the normative one from T.82: a table of constants that every
 //! implementation has to contain, not copied implementation code.
 //!
-//! Scope is deliberately narrow: one bit plane, one resolution layer, no adaptive template
+//! Scope is deliberately narrow: one or more bit planes, one resolution layer, no adaptive template
 //! movement, no differential layers. The pages this driver sends need nothing more.
 
 /// Lines per stripe. The value the reference implementation uses for this printer family.
@@ -253,6 +253,8 @@ pub enum JbigError {
     PlaneCount { expected: u8, got: usize },
     /// Width or height was zero.
     Empty,
+    /// The image's byte count is not representable on this target.
+    GeometryOverflow,
 }
 
 impl std::fmt::Display for JbigError {
@@ -265,6 +267,7 @@ impl std::fmt::Display for JbigError {
                 write!(f, "{got} bitmap(s) for a {expected}-plane image")
             }
             JbigError::Empty => write!(f, "image has zero width or height"),
+            JbigError::GeometryOverflow => write!(f, "image byte count overflows usize"),
         }
     }
 }
@@ -380,7 +383,10 @@ impl JbigEncoder {
                 got: bitmaps.len(),
             });
         }
-        let need = self.hbpl * self.height as usize;
+        let need = self
+            .hbpl
+            .checked_mul(self.height as usize)
+            .ok_or(JbigError::GeometryOverflow)?;
         for bitmap in bitmaps {
             if bitmap.len() < need {
                 return Err(JbigError::BitmapTooSmall {
@@ -392,8 +398,8 @@ impl JbigEncoder {
         let mut out = Vec::with_capacity(need / 8 + 64);
         out.extend_from_slice(&self.bih());
         for stripe in 0..self.stripes {
-            for plane in 0..self.planes as usize {
-                out.extend_from_slice(&self.encode_stripe(bitmaps[plane], stripe, plane));
+            for (plane, bitmap) in bitmaps.iter().enumerate() {
+                out.extend_from_slice(&self.encode_stripe(bitmap, stripe, plane));
             }
         }
         Ok(out)
@@ -515,12 +521,10 @@ impl JbigEncoder {
             body.push(MARKER_STUFF);
         }
         body.push(MARKER_ESC);
-        body.push(if self.options & 0x80 != 0 {
-            // SDRST, unreachable with our option set but kept for completeness
-            0x03
-        } else {
-            MARKER_SDNORM
-        });
+        // SDRST is a library-level switch (JBG_SDRST = 0x200), not a bit in the
+        // public BIH options byte. This encoder accepts only that byte, so every
+        // stripe uses the normal reset marker.
+        body.push(MARKER_SDNORM);
         body
     }
 
@@ -600,6 +604,21 @@ mod tests {
         assert_eq!(encode(8, 2, &[0xAA, 0x00]), want);
         let no_options = hex("0000010000000008000000020000008000000300be80ff02");
         assert_eq!(encode_with(8, 2, 0, &[0xAA, 0x00]), no_options);
+    }
+
+    #[test]
+    fn high_bih_option_bit_does_not_select_sdrst() {
+        let normal = encode_with(8, 2, 0, &[0xAA, 0x00]);
+        let high_bit = encode_with(8, 2, 0x80, &[0xAA, 0x00]);
+        assert_eq!(high_bit, normal);
+    }
+
+    #[test]
+    fn extreme_geometry_returns_an_error_on_every_target() {
+        assert!(matches!(
+            JbigEncoder::new(u32::MAX, u32::MAX).encode(&[]),
+            Err(JbigError::GeometryOverflow | JbigError::BitmapTooSmall { .. })
+        ));
     }
 
     /// Two planes: the fixture the reference encoder writes for a PGM of
