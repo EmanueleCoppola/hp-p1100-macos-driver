@@ -368,6 +368,7 @@ fn test_page(args: &[String]) -> Result<(), String> {
         height = (f64::from(height) * f).round() as u32;
     }
 
+    p1100_job::bitmap_header(width, height, dpi).map_err(|e| e.to_string())?;
     let bitmap = p1100_job::test_page_bitmap(pattern, width, height);
     let opts = JobOpts {
         encoding: if raw {
@@ -513,6 +514,14 @@ mod tests {
     use super::*;
     use p1100_protocol::{decode, item, strip_pjl_framing};
     use p1100_raster::{encode_page_header, PageHeader, SYNC_RASTER3};
+
+    #[test]
+    fn generated_pages_reject_unbounded_or_zero_resolution_before_allocation() {
+        for dpi in ["0", "4294967295"] {
+            let args = ["blank", "--dpi", dpi].map(str::to_owned);
+            assert!(test_page(&args).is_err());
+        }
+    }
 
     fn tiny_raster(width: u32, height: u32, path: &str) {
         let header = PageHeader {
@@ -675,7 +684,7 @@ fn send(args: &[String]) -> Result<(), String> {
         .env("DEVICE_URI", &device)
         .spawn()
         .map_err(|e| format!("cannot run {USB_BACKEND}: {e}"))?;
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout);
+    let started = std::time::Instant::now();
     loop {
         match child
             .try_wait()
@@ -687,7 +696,7 @@ fn send(args: &[String]) -> Result<(), String> {
             }
             Some(status) => return Err(format!("the backend exited with {status}")),
             None => {
-                if std::time::Instant::now() >= deadline {
+                if started.elapsed() >= std::time::Duration::from_secs(timeout) {
                     let _ = child.kill();
                     let _ = child.wait();
                     return Err(format!(
