@@ -16,4 +16,4 @@ path = "src/main.rs"
 
 [[bin]]
 name = "p1100-usbink"
-path = "src/bin/p1100-usbink.rs"
+path = "src/bin/p1100-usbink/main.rs"
