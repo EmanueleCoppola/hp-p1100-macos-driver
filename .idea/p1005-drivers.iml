@@ -8,6 +8,7 @@
       <sourceFolder url="file://$MODULE_DIR$/crates/p1100-job/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/p1100-protocol/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/p1100-raster/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/p1100-filter/tests" isTestSource="true" />
       <excludeFolder url="file://$MODULE_DIR$/crates/p1100-cli/target" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
