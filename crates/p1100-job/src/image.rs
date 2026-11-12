@@ -6,7 +6,7 @@
 
 use p1100_jbig::JbigEncoder;
 use p1100_protocol::{op, Encoder, Items, Reserved, JBIG_BID_MAX, JBIG_BIH_LEN};
-use p1100_raster::{to_mono1, to_two_bit_planes, PageHeader};
+use p1100_raster::{to_mono1, to_two_bit_packed, PageHeader};
 
 use crate::error::Error;
 use crate::options::{ImageEncoding, Options};
@@ -56,21 +56,13 @@ pub(crate) fn write_image(
                 .into(),
         ));
     }
-    // Two bits per pixel, screened through HP's table: two planes, each one bit of the level
-    // with the most significant plane first, and without LRLTWO, which is the configuration
-    // the reference encoder uses for a multi-plane image and the one the two-plane sweep
-    // checks. See docs/differences.md item 11.
-    let planes = to_two_bit_planes(header, pixels, table)?;
-    let refs: [&[u8]; 2] = [&planes[0], &planes[1]];
-    let mut jbig = JbigEncoder::with_options(
-        header.two_bit_width(),
-        header.cups_height,
-        p1100_jbig::DEFAULT_L0,
-        p1100_jbig::DEFAULT_ORDER,
-        p1100_jbig::DEFAULT_OPTIONS & !p1100_jbig::OPT_LRLTWO,
-    )
-    .planes(2);
-    let bie = jbig.encode_planes(&refs)?;
+    // HP packs the two bits of every logical pixel into adjacent bits of a single one-bit
+    // image, twice as wide as the page. The height includes the tone cell's 12-line rounding.
+    // See docs/differences.md item 11.
+    let packed = to_two_bit_packed(header, pixels, table)?;
+    let height = header.two_bit_height();
+    let mut jbig = JbigEncoder::new(header.two_bit_width() * 2, height);
+    let bie = jbig.encode(&packed)?;
     debug_assert!(bie.len() >= JBIG_BIH_LEN);
     let chunks: Vec<&[u8]> = bie[JBIG_BIH_LEN..].chunks(JBIG_BID_MAX).collect();
     enc.jbig_image(&bie[..JBIG_BIH_LEN], &chunks);
@@ -83,7 +75,7 @@ mod tests {
     use super::*;
     use crate::encode_raster_job;
     use crate::options::ToneTables;
-    use crate::test_support::{compression_raster, table};
+    use crate::test_support::{compression_raster, item_value, table};
     use p1100_protocol::{decode, strip_pjl_framing, STREAM_SIGNATURE};
 
     /// And it reaches the page image: a page marked 401 comes out exactly as it would with the
@@ -118,5 +110,40 @@ mod tests {
         let body = strip_pjl_framing(&marked_400);
         assert_eq!(&body[..4], STREAM_SIGNATURE);
         assert!(!decode(body).unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_two_bit_job_is_one_packed_plane_with_hps_rounded_geometry() {
+        let opts = Options {
+            tone_tables: Some(ToneTables {
+                at_400: table(0),
+                at_600: table(3),
+            }),
+            ..Options::default()
+        };
+        let job = encode_raster_job(&compression_raster(401), &opts).unwrap();
+        let body = strip_pjl_framing(&job);
+        let chunks = decode(body).unwrap();
+        let page = &chunks[1].items;
+        assert_eq!(item_value(page, p1100_protocol::item::NBIE), 1);
+        assert_eq!(item_value(page, p1100_protocol::item::VIDEO_X), 16);
+        assert_eq!(item_value(page, p1100_protocol::item::RASTER_X), 32);
+        assert_eq!(item_value(page, p1100_protocol::item::VIDEO_Y), 12);
+        assert_eq!(item_value(page, p1100_protocol::item::RESOLUTION_Y), 400);
+
+        let bih = chunks
+            .iter()
+            .find(|c| c.header.ty == p1100_protocol::op::JBIG_BIH)
+            .expect("a JBIG BIH");
+        assert_eq!(bih.payload.len(), 20);
+        assert_eq!(bih.payload[2], 1, "one packed plane");
+        assert_eq!(
+            u32::from_be_bytes(bih.payload[4..8].try_into().unwrap()),
+            128
+        );
+        assert_eq!(
+            u32::from_be_bytes(bih.payload[8..12].try_into().unwrap()),
+            12
+        );
     }
 }

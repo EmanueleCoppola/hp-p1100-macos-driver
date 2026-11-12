@@ -9,7 +9,7 @@
 //! p1100 raster-to-zjs <cups-raster-file> <out.zjs> [--no-pjl]
 //!               [--2bit --tone-table FILE]  screen grey into two bits
 //! p1100 zjs-dump      <zjs-file>
-//! p1100 wrap --bih <file> [--bid <file> ...] --width W --height H --resolution R \
+//! p1100 wrap --bih <file> [--bid <file> ...] --width W --height H --resolution R [--resolution-y R] \
 //!            [--bits N] [--paper-code N] [--no-pjl] -o <out.zjs>
 //! ```
 
@@ -67,7 +67,7 @@ USAGE:
   p1100 test-page      <pattern> [-o <out.zjs>] [--page letter|a4|legal] [--dpi N]
                                   [--raw] [--no-pjl] [--list]
   p1100 zjs-dump       <zjs-file>
-  p1100 wrap --bih <file> [--bid <file> ...] --width W --height H --resolution R
+  p1100 wrap --bih <file> [--bid <file> ...] --width W --height H --resolution R [--resolution-y R]
              [--bits N] [--paper-code N] [--no-pjl] -o <out.zjs>
   p1100 send <job.zjs> [--device URI] [--queue NAME] [--timeout SECS] [--dry-run]
 

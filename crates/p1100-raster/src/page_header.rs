@@ -90,6 +90,11 @@ impl PageHeader {
         (self.two_bit_width() / 8) as usize
     }
 
+    /// HP rounds the two-bit image height up to a multiple of 12, the tone-cell height.
+    pub fn two_bit_height(&self) -> u32 {
+        self.cups_height.saturating_add(11) / 12 * 12
+    }
+
     /// Bytes allocated for one converted 1-bit bitmap.
     pub fn bitmap_len(&self) -> Result<usize, RasterError> {
         if self.cups_width > u32::MAX - 127 {

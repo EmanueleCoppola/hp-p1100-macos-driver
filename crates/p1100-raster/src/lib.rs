@@ -65,8 +65,8 @@ pub use page_header::{align128, PageHeader};
 pub use reader::RasterReader;
 pub use stream::RasterStream;
 pub use tone::{
-    builtin_tone_table, builtin_tone_tables, to_two_bit_planes, tone_level, TONE_CELL,
-    TONE_ROW_BYTES, TONE_TABLE_LEN,
+    builtin_tone_table, builtin_tone_tables, to_two_bit_packed, to_two_bit_planes, tone_level,
+    TONE_CELL, TONE_ROW_BYTES, TONE_TABLE_LEN,
 };
 pub use validate::validate_page_header;
 pub use wire::{
@@ -84,10 +84,10 @@ mod api_surface_tests {
     #[allow(unused_imports)]
     use crate::{
         align128, builtin_tone_table, builtin_tone_tables, encode_page_header, to_mono1,
-        to_two_bit_planes, tone_level, validate_page_header, PageHeader, RasterError, RasterReader,
-        RasterStream, DEFAULT_THRESHOLD, MAX_BITMAP_PAYLOAD, MAX_PAGE_PAYLOAD, PAGE_HEADER_LEN,
-        SYNC_APPLE, SYNC_RASTER1, SYNC_RASTER2, SYNC_RASTER3, TONE_CELL, TONE_ROW_BYTES,
-        TONE_TABLE_LEN,
+        to_two_bit_packed, to_two_bit_planes, tone_level, validate_page_header, PageHeader,
+        RasterError, RasterReader, RasterStream, DEFAULT_THRESHOLD, MAX_BITMAP_PAYLOAD,
+        MAX_PAGE_PAYLOAD, PAGE_HEADER_LEN, SYNC_APPLE, SYNC_RASTER1, SYNC_RASTER2, SYNC_RASTER3,
+        TONE_CELL, TONE_ROW_BYTES, TONE_TABLE_LEN,
     };
 
     #[allow(unused_imports)]

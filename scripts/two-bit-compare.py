@@ -2,12 +2,11 @@
 """Check the whole two-bit path against the reference encoder.
 
 Why this exists: a two-bit page is ours to produce - HP's tone tables screened the driver's way,
-then two JBIG planes - and the only runnable implementation of the compression is the reference
-one. So the same page is built twice and the two jobs are compared: once through
-'p1100 raster-to-zjs --2bit --tone-table', and once through 'hp-tone-table.py --convert' and
-'pbmtojbg -b', wrapped by 'p1100 wrap --bits 2'. That compares our conversion, our two-plane
-encoder and our framing with the reference's in one run. It is what caught the aligned columns
-being padded black instead of white, which is the kind of thing only an end-to-end check sees.
+packed as two adjacent bits in one one-bit image - and the only runnable implementation of the
+compression is the reference one. So the same page is built twice and the two jobs are compared:
+once through 'p1100 raster-to-zjs --2bit --tone-table', and once through
+'hp-tone-table.py --convert' and 'pbmtojbg', wrapped by 'p1100 wrap --bits 2'. That compares our
+conversion, our packed encoder and our framing with the reference's in one run.
 
 Needs the installed HP driver for the tone tables and the JBIG oracle for the reference encoder.
 
@@ -30,11 +29,6 @@ REPO = os.path.dirname(HERE)
 PY = sys.executable
 CLI = os.path.join(REPO, 'target/release/p1100')
 ORACLE = os.path.join(HERE, 'jbig-oracle.sh')
-
-# The parameters the reference encoder is given for a two-plane image: binary words rather than
-# Gray code (-b), one resolution layer, L0 128 (-s), no adaptive template (-m 0), order 3 (-o),
-# and options 0x1c (-p 28), which is what it picks for a multi-plane image - no LRLTWO.
-PLANE_OPTIONS = 28
 
 PAGES = ((16, 8), (16, 130), (129, 40), (300, 260))
 
@@ -75,17 +69,19 @@ def main(argv):
         subprocess.run([CLI, 'raster-to-zjs', raster, ours, '--2bit', '--tone-table', table_path],
                        check=True, stderr=subprocess.DEVNULL)
 
-        pgm = tone.convert(raster, table, work, stem='ref')[0][0]
+        pbm = tone.convert(raster, table, work, stem='ref')[0][0]
         bie = os.path.join(work, 'ref.jbg')
-        subprocess.run([ORACLE, 'encode', pgm, bie, '-b', '-p', str(PLANE_OPTIONS)], check=True,
+        subprocess.run([ORACLE, 'encode', pbm, bie], check=True,
                        stdout=subprocess.DEVNULL)
         blob = open(bie, 'rb').read()
         open(os.path.join(work, 'ref.bih'), 'wb').write(blob[:20])
         open(os.path.join(work, 'ref.bid'), 'wb').write(blob[20:])
         ref = os.path.join(work, 'ref.zjs')
+        page_height = ((height + 11) // 12) * 12
         subprocess.run([CLI, 'wrap', '--bih', os.path.join(work, 'ref.bih'), '--bid',
                         os.path.join(work, 'ref.bid'), '--bits', '2', '--width', str(width),
-                        '--height', str(height), '-o', ref], check=True,
+                        '--height', str(page_height), '--resolution', '600',
+                        '--resolution-y', '400', '-o', ref], check=True,
                        stderr=subprocess.DEVNULL)
 
         diff = subprocess.run([PY, os.path.join(HERE, 'zjs-compare.py'), ours, ref,
@@ -106,7 +102,7 @@ def main(argv):
     if failures:
         print('  the scratch directory is kept: %s' % work)
         return 1
-    print('our screening, our two-plane encoder and our framing agree with the reference encoder')
+    print('our screening, our packed encoder and our framing agree with the reference encoder')
     return 0
 
 

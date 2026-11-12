@@ -25,6 +25,15 @@ pub fn geometry(header: &PageHeader, opts: &Options) -> PageGeometry {
     // Two-bit screening changes the page's depth: VIDEO_BPP, NBIE and RASTER_X follow from
     // `bits_per_pixel`, while VIDEO_X stays the logical pixel width.
     g.bits_per_pixel = if opts.tone_tables.is_some() { 2 } else { 1 };
+    if g.bits_per_pixel == 2 {
+        // HP reports the two-bit page at the rounded-up tone-cell height and takes its
+        // vertical dpi from the cupsCompression marker (400 for the default PPD choice).
+        g.height = header.two_bit_height();
+        let marker = header.cups_compression & 0x3ffe;
+        if marker != 0 {
+            g.resolution_y = marker;
+        }
+    }
     // The media type code the PPD put into the raster header is the authoritative one for
     // the medium that was actually selected, so it is forwarded rather than re-derived
     // from the option name. Falls back to standard when it is unset.

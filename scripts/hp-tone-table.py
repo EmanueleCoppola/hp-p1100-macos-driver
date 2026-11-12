@@ -165,6 +165,7 @@ def tiny_raster(path, width, height, rows, page_size_name=b'Letter'):
     struct.pack_into('<I', header, cupsraster.CUPS_BITS_PER_PIXEL, 8)
     struct.pack_into('<I', header, cupsraster.CUPS_BYTES_PER_LINE, width)
     struct.pack_into('<I', header, cupsraster.CUPS_NUM_COLORS, 1)
+    struct.pack_into('<I', header, cupsraster.CUPS_COMPRESSION, 401)
     struct.pack_into('<II', header, cupsraster.HW_RESOLUTION, 600, 600)
     at = cupsraster.CUPS_PAGE_SIZE_NAME
     header[at:at + len(page_size_name)] = page_size_name
@@ -204,15 +205,16 @@ def convert(raster_path, table, out_dir, stem='page'):
         bpl = header['bytes_per_line']
         aligned = (width + 63) & ~63
         grey = data[off + cupsraster.PAGE_HEADER_LEN:off + cupsraster.PAGE_HEADER_LEN + payload]
-        path = os.path.join(out_dir, '%s-%d.pgm' % (stem, page + 1))
-        row = bytearray([3]) * aligned
+        out_height = ((height + ROWS - 1) // ROWS) * ROWS
+        row = bytearray(aligned // 4)
         groups = width // COLS
         data_row = bytearray(width)
         # Bilevel in the page, if not necessarily in the row padding: bytes(..) makes this a
         # C-level pass over the payload rather than a Python loop over thirty million pixels.
         bilevel = set(grey) <= {0, 255}
+        path = os.path.join(out_dir, '%s-%d.pbm' % (stem, page + 1))
         with open(path, 'wb') as f:
-            f.write(b'P5\n%d %d\n3\n' % (aligned, height))
+            f.write(b'P4\n%d %d\n' % (aligned * 2, out_height))
             for y in range(height):
                 src = grey[y * bpl:(y + 1) * bpl]
                 per_column = translations[(-y) % ROWS]
@@ -236,11 +238,21 @@ def convert(raster_path, table, out_dir, stem='page'):
                                 '%s: grey %d at (%d, %d) screened to level %d, and a bi-level '
                                 'page has to come out 0 or 3' % (raster_path, src[x], x, y,
                                                                  data_row[x]))
-                row[:width] = data_row
+                # Pack the complement of each level into two adjacent bits, the way HP
+                # hands the row to its one-bit JBIG encoder. Padding stays zero (white).
+                row[:] = b'\x00' * (aligned // 4)
+                for x in range(width):
+                    level = 3 - data_row[x]
+                    bit = 2 * x
+                    if level & 2:
+                        row[bit // 8] |= 0x80 >> (bit & 7)
+                    if level & 1:
+                        row[(bit + 1) // 8] |= 0x80 >> ((bit + 1) & 7)
                 f.write(row)
-                for x in range(width, aligned):
-                    row[x] = 3
-        written.append((path, aligned, height))
+            row[:] = b'\x00' * (aligned // 4)
+            for _ in range(height, out_height):
+                f.write(row)
+        written.append((path, aligned * 2, out_height))
         if bilevel:
             print('   %s is bi-level, and the screening agrees with thresholding it'
                   % os.path.basename(path))
@@ -269,7 +281,7 @@ def main(argv):
     ap.add_argument('--selftest', action='store_true',
                     help='check a synthetic table instead of the installed driver')
     ap.add_argument('--convert', metavar='RASTER',
-                    help='screen a CUPS raster into two-bit pages (P5, maxval 3)')
+                    help='screen a CUPS raster into packed two-bit pages (P4)')
     ap.add_argument('--pages', metavar='DIR', default='.',
                     help='where --convert writes its pages (default: the current directory)')
     ap.add_argument('--table', choices=('400', '600'), default='400',
@@ -298,14 +310,17 @@ def main(argv):
             raster = tiny_raster(os.path.join(work, 'tiny.raster'), 6, len(samples), samples)
             page, width, height = convert(raster, levels, work, stem='tiny')[0]
             blob = open(page, 'rb').read()
-            assert blob.startswith(b'P5\n64 2\n3\n'), blob[:16]
-            pixels = blob[blob.index(b'3\n') + 2:]
-            assert len(pixels) == 64 * 2
+            assert blob.startswith(b'P4\n128 12\n'), blob[:16]
+            pixels = blob[blob.index(b'12\n') + 3:]
+            assert len(pixels) == 16 * 12
             # The fast path and the one-pixel-at-a-time rule have to agree everywhere.
             for y, line in enumerate(samples):
                 for x, grey in enumerate(line):
-                    assert pixels[y * width + x] == level_of(levels, grey, x, y), (x, y)
-            assert pixels[63] == 3, 'the aligned padding should be the lightest level'
+                    level = 3 - level_of(levels, grey, x, y)
+                    got = ((pixels[y * 16 + (2 * x) // 8] >> (7 - ((2 * x) % 8))) & 1,
+                           (pixels[y * 16 + (2 * x + 1) // 8] >> (7 - ((2 * x + 1) % 8))) & 1)
+                    assert got == (level >> 1, level & 1), (x, y)
+            assert not any(pixels[-16:]), 'the rows past the page must be white'
             print('   a 6x2 page screens to a %dx%d two-bit page, padding included'
                   % (width, height))
         finally:

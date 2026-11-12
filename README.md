@@ -249,13 +249,14 @@ item 11), and that page can be built here, which is how the difference gets sett
 
     PY=/opt/homebrew/bin/python3.13
     $PY scripts/hp-tone-table.py --convert /tmp/1p.raster --pages /tmp/twobit
-    ./scripts/jbig-oracle.sh encode /tmp/twobit/page-1.pgm /tmp/twobit/page.jbg -b -p 28
+    ./scripts/jbig-oracle.sh encode /tmp/twobit/page-1.pbm /tmp/twobit/page.jbg
     dd if=/tmp/twobit/page.jbg bs=1 count=20 of=/tmp/twobit/page.bih
     dd if=/tmp/twobit/page.jbg bs=1 skip=20 of=/tmp/twobit/page.bid
     p1100 wrap --bih /tmp/twobit/page.bih --bid /tmp/twobit/page.bid \
-        --bits 2 --width 4900 --height 6400 -o /tmp/twobit/page.zjs
+        --bits 2 --width 4900 --height 6408 --resolution 600 --resolution-y 400 \
+        -o /tmp/twobit/page.zjs
 
-The same job comes out of one command, through this repository's own conversion and two-plane
+The same job comes out of one command, through this repository's own conversion and packed
 encoder rather than the tool plus the reference encoder, and `scripts/two-bit-compare.py`
 requires the two to agree:
 
@@ -264,11 +265,10 @@ requires the two to agree:
         --tone-table /tmp/twobit/sdtahs10.bin
 
 The screening uses the tables out of the installed HP driver, so it is what that driver would
-have sent; the pages are written at the aligned width, and `-b` selects binary rather than
-Gray-coded words in the two planes, which a decoder has to be told because the BIE does not say.
-`--bits 2` is what makes the page items read `ZJI_VIDEO_BPP` 2, `ZJI_NBIE` 2 and
-`ZJI_VIDEO_X` = width with `ZJI_RASTER_X` = width*2, which is our reading of HP's own item
-emission and needs the printer to confirm. A page of only black and white screens to itself -
+have sent; the two bits of each pixel are packed next to each other in one one-bit image, and
+the height is rounded up to 12. `--bits 2` is what makes the page items read `ZJI_VIDEO_BPP` 2,
+`ZJI_NBIE` 1 and `ZJI_VIDEO_X` = width with `ZJI_RASTER_X` = width*2, matching HP's own item
+emission. A page of only black and white screens to itself -
 the tables take 0 to level 0 and
 255 to level 3, and `--convert` says so when it sees such a page - so a one-bit job and a
 two-bit job of the same document are the same page, which is what makes comparing them on a

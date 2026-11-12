@@ -265,7 +265,7 @@ mod tests {
             .expect("the two-bit invocation");
         let job = fs::read(&out).unwrap();
         assert_eq!(item_of(&job, item::VIDEO_BPP), 2);
-        assert_eq!(item_of(&job, item::NBIE), 2);
+        assert_eq!(item_of(&job, item::NBIE), 1);
         assert_eq!(item_of(&job, item::VIDEO_X), 16);
         assert_eq!(
             item_of(&job, item::RASTER_X),

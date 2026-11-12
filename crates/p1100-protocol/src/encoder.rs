@@ -101,8 +101,8 @@ impl Encoder {
         if duplex::is_duplexing(g.duplex) {
             items.push_u32(item::DMDUPLEX, g.duplex);
         }
-        if g.econo_mode {
-            items.push_u32(item::ECONOMODE, 1);
+        if g.econo_mode || g.bits_per_pixel == 2 {
+            items.push_u32(item::ECONOMODE, u32::from(g.econo_mode));
         }
         // HP keeps VIDEO_X in logical pixels and makes RASTER_X the width in bits across
         // the planes. The two are equal at one bit; at two bits RASTER_X is twice VIDEO_X.
@@ -120,9 +120,10 @@ impl Encoder {
         if g.offset_y != 0 {
             items.push_u32(item::OFFSET_Y, g.offset_y);
         }
-        // ZJI_NBIE counts bi-level image entities, i.e. bit planes: one for the mono page the
-        // default path sends, two for the screened page HP's driver sends.
-        items.push_u32(item::NBIE, g.bits_per_pixel.max(1));
+        // HP's two-bit page is still one bi-level image entity: the two bits of each logical
+        // pixel are packed next to each other in a single plane. The reference one-bit shape
+        // also uses one, so this is always one here.
+        items.push_u32(item::NBIE, 1);
         items.push_u32(item::RESOLUTION_X, g.resolution_x);
         items.push_u32(item::RESOLUTION_Y, g.resolution_y);
         if g.ret {
@@ -290,7 +291,7 @@ mod tests {
         assert_eq!(value_of(items, item::VIDEO_BPP), 2);
         assert_eq!(value_of(items, item::VIDEO_X), 4900);
         assert_eq!(value_of(items, item::RASTER_X), 9800);
-        assert_eq!(value_of(items, item::NBIE), 2);
+        assert_eq!(value_of(items, item::NBIE), 1);
         assert_eq!(value_of(items, item::RASTER_Y), 6400);
     }
 

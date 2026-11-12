@@ -432,14 +432,13 @@ antialiased text and photographs get a hard edge from us where HP would print a 
 the printer would have four levels to work with instead of two.
 
 What matching it would take, and where it stands. The encoder is done: `p1100-jbig` writes
-`planes(n)`, and its two-plane output is byte-identical to the reference encoder's for six pages
-in `scripts/jbig-sweep.py`, with goldens for a one-stripe and a two-stripe page in the crate's
-own tests.
+single-plane and multi-plane images, and its output is byte-identical to the reference
+encoder's for the one-stripe, two-stripe and multi-plane pages in `scripts/jbig-sweep.py`.
 
 The conversion is implemented twice over, once in `scripts/hp-tone-table.py --convert` and
-once in the library (`p1100_raster::to_two_bit_planes`, reachable as
+once in the library (`p1100_raster::to_two_bit_packed`, reachable as
 `p1100 raster-to-zjs --2bit --tone-table FILE`), and the two are held together by
-`scripts/two-bit-compare.py`: the same page built through our conversion, our two-plane encoder
+`scripts/two-bit-compare.py`: the same page built through our conversion, our packed encoder
 and our framing, and through the tool plus the reference encoder, has to come out the same job.
 That check earned its keep immediately - it caught the aligned columns past the page width being
 padded black rather than white, where the one-bit path's padding is white and a zeroed two-bit
@@ -453,18 +452,18 @@ clustered-dot table internally and uses it when HP's files are absent. The built
 the same shape and the same four levels, but it is our generated data rather than a copy of
 HP's proprietary table.
 
-The item side is done with it: `PageGeometry`'s `bits_per_pixel` is what `ZJI_VIDEO_BPP`,
-`ZJI_NBIE` and `ZJI_RASTER_X` are computed from, while `ZJI_VIDEO_X` stays the logical width.
-The two-bit image itself is aligned to 64 pixels, not the one-bit path's 128, and the job layer
-sets both from the same option that selects the screening, so a two-bit page announces itself
-consistently.
+The item side is done with it: `PageGeometry`'s `bits_per_pixel` is what `ZJI_VIDEO_BPP` and
+`ZJI_RASTER_X` are computed from, while `ZJI_VIDEO_X` stays the logical width and `ZJI_NBIE`
+stays 1. The two-bit image itself is a single packed plane aligned to 64 pixels, with its height
+rounded up to 12, not the one-bit path's 128-pixel alignment.
 
 That marker also picks the table: `ToneTables::for_page` takes the 400 dpi cell when `cupsCompression & 0x3ffe` is 400 and the 600 dpi one otherwise, which is what the bullet
 above says HP does with it, and the job layer tests both halves: the page marked 401 comes out
 exactly as it would with the 400 dpi table in both slots.
 
 The framing has now crossed the printer path: the native queue completed job 403 with
-`p1100Grey=Screened2`, including the two plane records. HP's page items come from
+`p1100Grey=Screened2`, and the captured HP job uses one packed JBIG image, not two plane records.
+HP's page items come from
 `zcups::Formatter::startPage`, which takes the depth as its third argument and reads a
 `bitsPerPixel` property, and whether plane records are written at all is behind three
 `zjs::BandWriter` flags - `sendPlaneItem`, `sendStartPlaneChunk` and `sendEndPlaneChunk` -

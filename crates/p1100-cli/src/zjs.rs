@@ -77,6 +77,7 @@ pub(crate) fn wrap(args: &[String]) -> Result<(), String> {
     let mut width = 0u32;
     let mut height = 0u32;
     let mut resolution = 600u32;
+    let mut resolution_y = 0u32;
     let mut paper = p1100_protocol::paper::LETTER;
     let mut bits = 1u32;
     let mut pjl = true;
@@ -106,6 +107,10 @@ pub(crate) fn wrap(args: &[String]) -> Result<(), String> {
             }
             "--resolution" => {
                 resolution = need(i)?.parse().map_err(|_| "bad --resolution")?;
+                i += 2;
+            }
+            "--resolution-y" => {
+                resolution_y = need(i)?.parse().map_err(|_| "bad --resolution-y")?;
                 i += 2;
             }
             "--paper-code" => {
@@ -152,6 +157,9 @@ pub(crate) fn wrap(args: &[String]) -> Result<(), String> {
     let bid_refs: Vec<&[u8]> = bid_data.iter().map(|v| v.as_slice()).collect();
 
     let mut g = PageGeometry::mono(width, height, resolution);
+    if resolution_y != 0 {
+        g.resolution_y = resolution_y;
+    }
     g.paper = paper;
     g.bits_per_pixel = bits;
 

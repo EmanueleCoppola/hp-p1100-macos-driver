@@ -348,10 +348,10 @@ def check_screened(raster_path, work, zc):
                 str(items.get('NBIE')).split()[0])
 
     got, nbie = job_bits()
-    if got != '2' or nbie != '2':
-        raise Lever('the built-in table should make the page two bits per pixel in two '
-                    'entities, but it carries VIDEO_BPP %s and NBIE %s' % (got, nbie))
-    lines.append('without HP tables, the built-in table carries VIDEO_BPP 2 and NBIE 2')
+    if got != '2' or nbie != '1':
+        raise Lever('the built-in table should make the page two bits per pixel in one '
+                    'packed image, but it carries VIDEO_BPP %s and NBIE %s' % (got, nbie))
+    lines.append('without HP tables, the built-in table carries VIDEO_BPP 2 and NBIE 1')
 
     empty = os.path.join(work, 'no-tones')
     code, stderr, _ = run_filter(raster_path, 'p1100Grey=Screened2', out,
@@ -374,9 +374,9 @@ def check_screened(raster_path, work, zc):
         shutil.copyfile(os.path.join(tables, src), os.path.join(tables, dst))
 
     got, nbie = job_bits({'P1100_TONES': tables})
-    if got != '2' or nbie != '2':
+    if got != '2' or nbie != '1':
         raise Lever('with HP tables, the page carries VIDEO_BPP %s and NBIE %s' % (got, nbie))
-    lines.append('with HP tables reachable, the page still carries VIDEO_BPP 2 and NBIE 2')
+    lines.append('with HP tables reachable, the page still carries VIDEO_BPP 2 and NBIE 1')
     return lines
 
 def run_filter(raster_path, options, out_path, raw=False, env_overrides=None):

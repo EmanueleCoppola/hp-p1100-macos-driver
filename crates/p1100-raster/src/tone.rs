@@ -163,6 +163,68 @@ pub fn to_two_bit_planes(
     Ok(planes)
 }
 
+/// Pack the two-bit levels the way HP's `ScreenPixelsTwoBit` hands them to JBIG: one
+/// bitplane whose width is twice the logical width, each pixel occupying two adjacent bits.
+/// The bytes are the complement of the table level (HP's encoder writes white as 0), and the
+/// image height is rounded up to the 12-line tone cell.
+pub fn to_two_bit_packed(
+    header: &PageHeader,
+    pixels: &[u8],
+    table: &[u8],
+) -> Result<Vec<u8>, RasterError> {
+    if table.len() < TONE_TABLE_LEN {
+        return Err(RasterError::ToneTableShort {
+            need: TONE_TABLE_LEN,
+            got: table.len(),
+        });
+    }
+    validate_page_header(header)?;
+    if header.cups_bits_per_pixel != 8 {
+        return Err(RasterError::UnsupportedDepth(header.cups_bits_per_pixel));
+    }
+    let expected = header.payload_len()?;
+    if pixels.len() < expected {
+        return Err(RasterError::ShortPixels {
+            expected,
+            got: pixels.len(),
+        });
+    }
+    let w = header.cups_width as usize;
+    let h = header.cups_height as usize;
+    let aligned = header.two_bit_width() as usize;
+    let out_h = header.two_bit_height() as usize;
+    let stride = aligned / 4;
+    let len = stride
+        .checked_mul(out_h)
+        .ok_or(RasterError::GeometryOverflow)?;
+    if len > MAX_BITMAP_PAYLOAD {
+        return Err(RasterError::BitmapTooLarge {
+            size: len,
+            max: MAX_BITMAP_PAYLOAD,
+        });
+    }
+    let src_stride = header.cups_bytes_per_line as usize;
+    let mut out = vec![0u8; len];
+    for y in 0..h {
+        let src = &pixels[y * src_stride..];
+        let dst = &mut out[y * stride..(y + 1) * stride];
+        for x in 0..w {
+            // Complement the level: the printer's packed bits use zero for white.
+            let level = 3 - tone_level(table, src[x], x, y);
+            let bit = 2 * x;
+            if level & 2 != 0 {
+                dst[bit / 8] |= 0x80 >> (bit & 7);
+            }
+            if level & 1 != 0 {
+                dst[(bit + 1) / 8] |= 0x80 >> ((bit + 1) & 7);
+            }
+        }
+        // The bytes past the page width and the extra lines are zero, i.e. the packed
+        // complement of the lightest level.
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
