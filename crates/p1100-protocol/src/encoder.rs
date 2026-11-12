@@ -104,10 +104,15 @@ impl Encoder {
         if g.econo_mode {
             items.push_u32(item::ECONOMODE, 1);
         }
-        items.push_u32(item::VIDEO_X, g.width / g.bits_per_pixel.max(1));
+        // HP keeps VIDEO_X in logical pixels and makes RASTER_X the width in bits across
+        // the planes. The two are equal at one bit; at two bits RASTER_X is twice VIDEO_X.
+        items.push_u32(item::VIDEO_X, g.width);
         items.push_u32(item::VIDEO_Y, g.height);
         items.push_u32(item::VIDEO_BPP, g.bits_per_pixel);
-        items.push_u32(item::RASTER_X, g.width);
+        items.push_u32(
+            item::RASTER_X,
+            g.width.saturating_mul(g.bits_per_pixel.max(1)),
+        );
         items.push_u32(item::RASTER_Y, g.height);
         if g.offset_x != 0 {
             items.push_u32(item::OFFSET_X, g.offset_x);
@@ -271,8 +276,8 @@ mod tests {
     }
 
     /// A two-bit page: the same items, with the depth carried through them the way that path
-    /// needs it. VIDEO_X is the width in pixels over the bits per pixel, NBIE counts the two
-    /// bi-level image entities, and RASTER_X stays the page's true width in pixels.
+    /// needs it. VIDEO_X stays the logical width, RASTER_X is the width in bits across the two
+    /// planes, and NBIE counts the two bi-level image entities.
     #[test]
     fn page_start_carries_a_two_bit_depth() {
         let mut enc = Encoder::new();
@@ -283,9 +288,9 @@ mod tests {
         let chunks = decode_of(&mut enc);
         let items = &chunks[0].items;
         assert_eq!(value_of(items, item::VIDEO_BPP), 2);
-        assert_eq!(value_of(items, item::VIDEO_X), 2450);
+        assert_eq!(value_of(items, item::VIDEO_X), 4900);
+        assert_eq!(value_of(items, item::RASTER_X), 9800);
         assert_eq!(value_of(items, item::NBIE), 2);
-        assert_eq!(value_of(items, item::RASTER_X), 4900);
         assert_eq!(value_of(items, item::RASTER_Y), 6400);
     }
 

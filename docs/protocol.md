@@ -185,7 +185,11 @@ The reference implementation drives the P1102 as model `2` with flags `-P -z2 -L
 - The raster handed to JBIG is **width-aligned up to a multiple of 128 pixels**
   (`w = (w + 127) & ~127`), while `ZJI_RASTER_X` keeps the true unaligned pixel width.
   Bitmap scanlines are padded to a 16-byte (128-bit) multiple.
-- `ZJI_VIDEO_X` is `raster_width / bits_per_pixel`; `ZJI_VIDEO_BPP` is 1 for monochrome.
+- The two-bit path is different in two places: HP aligns its packed row to a multiple of
+  **64 pixels**, so each bit plane is `align64(width) / 8` bytes, and `ZJI_RASTER_X` is
+  `width * 2` while `ZJI_VIDEO_X` stays `width`.
+- `ZJI_VIDEO_X` is the logical `raster_width`; `ZJI_RASTER_X` is `raster_width * bits_per_pixel`,
+  so the two are equal at one bit and double at two. `ZJI_VIDEO_BPP` is 1 for monochrome.
 
 What HP's own driver sends for this printer is not that shape. Its PPD sets
 `cupsCompression` to 401 - and to 1 for the other resolution choice - and the driver turns

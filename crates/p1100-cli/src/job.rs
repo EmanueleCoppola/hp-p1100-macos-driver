@@ -266,10 +266,11 @@ mod tests {
         let job = fs::read(&out).unwrap();
         assert_eq!(item_of(&job, item::VIDEO_BPP), 2);
         assert_eq!(item_of(&job, item::NBIE), 2);
+        assert_eq!(item_of(&job, item::VIDEO_X), 16);
         assert_eq!(
-            item_of(&job, item::VIDEO_X),
-            8,
-            "half of the sixteen-pixel width"
+            item_of(&job, item::RASTER_X),
+            32,
+            "the two planes together span twice the logical width"
         );
 
         let err = raster_to_zjs(&args(&["--2bit"])).unwrap_err();

@@ -44,7 +44,7 @@ pub struct JbigEncoder {
 impl JbigEncoder {
     /// `width` is the image width announced in the BIH and used for the bitmap stride. The
     /// ZjStream path passes the width rounded up to a multiple of 128 here while keeping
-    /// the true width in its `RASTER_X` item.
+    /// the logical width in `VIDEO_X` and the bit width in `RASTER_X`.
     pub fn new(width: u32, height: u32) -> Self {
         Self::with_options(width, height, DEFAULT_L0, DEFAULT_ORDER, DEFAULT_OPTIONS)
     }

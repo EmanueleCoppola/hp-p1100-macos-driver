@@ -114,7 +114,6 @@ pub fn to_two_bit_planes(
     if header.cups_bits_per_pixel != 8 {
         return Err(RasterError::UnsupportedDepth(header.cups_bits_per_pixel));
     }
-    let bitmap_len = header.bitmap_len()?;
     let expected = header.payload_len()?;
     if pixels.len() < expected {
         return Err(RasterError::ShortPixels {
@@ -124,7 +123,13 @@ pub fn to_two_bit_planes(
     }
     let w = header.cups_width as usize;
     let h = header.cups_height as usize;
-    let stride = header.mono_row_bytes();
+    // HP's two-bit path aligns its packed row to 64 pixels, so each of the two bit planes
+    // is 1/8 of that width. This is deliberately different from the 128-pixel alignment of
+    // the one-bit JBIG image.
+    let stride = header.two_bit_row_bytes();
+    let bitmap_len = stride
+        .checked_mul(header.cups_height as usize)
+        .ok_or(RasterError::GeometryOverflow)?;
     let src_stride = header.cups_bytes_per_line as usize;
     let total = bitmap_len
         .checked_mul(2)
@@ -198,24 +203,20 @@ mod tests {
             0u8, 5, 10, 20, 40, 60, 80, 100, 120, 140, 160, 180, 200, 220, 240, 255,
         ];
         let planes = to_two_bit_planes(&h, &px, &t).unwrap();
-        assert_eq!(planes[0].len(), 32);
-        assert_eq!(planes[1].len(), 32);
+        assert_eq!(planes[0].len(), 16);
+        assert_eq!(planes[1].len(), 16);
         for (y, row) in px.chunks(8).enumerate() {
             for (x, grey) in row.iter().enumerate() {
                 let level = tone_level(&t, *grey, x, y);
-                let bit = |p: usize| (planes[p][y * 16 + (x >> 3)] >> (7 - (x & 7))) & 1;
+                let bit = |p: usize| (planes[p][y * 8 + (x >> 3)] >> (7 - (x & 7))) & 1;
                 assert_eq!(bit(0), level >> 1, "plane 0 at ({x}, {y})");
                 assert_eq!(bit(1), level & 1, "plane 1 at ({x}, {y})");
             }
             assert!(
-                planes[0][y * 16 + 1..(y + 1) * 16]
-                    .iter()
-                    .all(|b| *b == 0xFF),
+                planes[0][y * 8 + 1..(y + 1) * 8].iter().all(|b| *b == 0xFF),
                 "row padding is the lightest level, so both planes are set there"
             );
-            assert!(planes[1][y * 16 + 1..(y + 1) * 16]
-                .iter()
-                .all(|b| *b == 0xFF));
+            assert!(planes[1][y * 8 + 1..(y + 1) * 8].iter().all(|b| *b == 0xFF));
         }
     }
     #[test]

@@ -179,10 +179,9 @@ def tiny_raster(path, width, height, rows, page_size_name=b'Letter'):
 def convert(raster_path, table, out_dir, stem='page'):
     """Screen each page of a CUPS raster into the two-bit page the driver would have sent.
 
-    The page is written at the *aligned* width the encoder works in - the true width rounded
-    up to a multiple of 128 - so the BIH's XD comes out the same as the one a one-bit job
-    carries, and the padding pixels take the lightest level, which is what a zero padding bit
-    means in the one-bit path.
+    The page is written at the *aligned* width HP's two-bit path uses - the true width rounded
+    up to a multiple of 64 - and the padding pixels take the lightest level, which is what a
+    zero padding bit means in the one-bit path.
     """
     cupsraster = load('cupsraster')
     os.makedirs(out_dir, exist_ok=True)
@@ -203,7 +202,7 @@ def convert(raster_path, table, out_dir, stem='page'):
     for page, off, header, payload in cupsraster.walk(data):
         width, height = header['width'], header['height']
         bpl = header['bytes_per_line']
-        aligned = (width + 127) & ~127
+        aligned = (width + 63) & ~63
         grey = data[off + cupsraster.PAGE_HEADER_LEN:off + cupsraster.PAGE_HEADER_LEN + payload]
         path = os.path.join(out_dir, '%s-%d.pgm' % (stem, page + 1))
         row = bytearray([3]) * aligned
@@ -299,14 +298,14 @@ def main(argv):
             raster = tiny_raster(os.path.join(work, 'tiny.raster'), 6, len(samples), samples)
             page, width, height = convert(raster, levels, work, stem='tiny')[0]
             blob = open(page, 'rb').read()
-            assert blob.startswith(b'P5\n128 2\n3\n'), blob[:16]
+            assert blob.startswith(b'P5\n64 2\n3\n'), blob[:16]
             pixels = blob[blob.index(b'3\n') + 2:]
-            assert len(pixels) == 128 * 2
+            assert len(pixels) == 64 * 2
             # The fast path and the one-pixel-at-a-time rule have to agree everywhere.
             for y, line in enumerate(samples):
                 for x, grey in enumerate(line):
                     assert pixels[y * width + x] == level_of(levels, grey, x, y), (x, y)
-            assert pixels[127] == 3, 'the aligned padding should be the lightest level'
+            assert pixels[63] == 3, 'the aligned padding should be the lightest level'
             print('   a 6x2 page screens to a %dx%d two-bit page, padding included'
                   % (width, height))
         finally:

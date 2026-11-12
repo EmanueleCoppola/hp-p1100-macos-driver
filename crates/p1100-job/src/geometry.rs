@@ -22,8 +22,8 @@ pub fn geometry(header: &PageHeader, opts: &Options) -> PageGeometry {
     g.duplex = opts.duplex;
     g.econo_mode = opts.econo_mode;
     g.source = opts.source;
-    // Two-bit screening changes the page's depth, and the items follow from it: VIDEO_BPP,
-    // VIDEO_X and NBIE all come from `bits_per_pixel`.
+    // Two-bit screening changes the page's depth: VIDEO_BPP, NBIE and RASTER_X follow from
+    // `bits_per_pixel`, while VIDEO_X stays the logical pixel width.
     g.bits_per_pixel = if opts.tone_tables.is_some() { 2 } else { 1 };
     // The media type code the PPD put into the raster header is the authoritative one for
     // the medium that was actually selected, so it is forwarded rather than re-derived

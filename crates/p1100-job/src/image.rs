@@ -63,7 +63,7 @@ pub(crate) fn write_image(
     let planes = to_two_bit_planes(header, pixels, table)?;
     let refs: [&[u8]; 2] = [&planes[0], &planes[1]];
     let mut jbig = JbigEncoder::with_options(
-        header.jbig_width(),
+        header.two_bit_width(),
         header.cups_height,
         p1100_jbig::DEFAULT_L0,
         p1100_jbig::DEFAULT_ORDER,

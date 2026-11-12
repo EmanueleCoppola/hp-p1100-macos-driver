@@ -73,9 +73,21 @@ impl PageHeader {
     }
 
     /// Width rounded up to the 128-pixel boundary used for the JBIG image, while the
-    /// encoder's `RASTER_X` item keeps the true width.
+    /// encoder's `VIDEO_X` item keeps the logical width and `RASTER_X` the bit width.
     pub fn jbig_width(&self) -> u32 {
         align128(self.cups_width)
+    }
+
+    /// Width of the two-bit page, aligned to 64 pixels as HP's `ProcessMonoTwoBit` does.
+    /// Its packed row is therefore `two_bit_width() / 4` bytes; the two bit planes are each
+    /// `two_bit_row_bytes()` bytes.
+    pub fn two_bit_width(&self) -> u32 {
+        self.cups_width.saturating_add(63) & !63
+    }
+
+    /// Bytes in one bit plane of the two-bit page.
+    pub fn two_bit_row_bytes(&self) -> usize {
+        (self.two_bit_width() / 8) as usize
     }
 
     /// Bytes allocated for one converted 1-bit bitmap.
@@ -165,6 +177,13 @@ mod tests {
         assert_eq!(h.mono_row_bytes(), 624);
         assert_eq!(h.jbig_width(), 4992);
         assert_eq!(h.payload_len().unwrap(), 31_360_000);
+    }
+    #[test]
+    fn two_bit_geometry_uses_hps_64_pixel_alignment() {
+        let h = letter_mono_header(4758, 6817);
+        assert_eq!(h.two_bit_width(), 4800);
+        assert_eq!(h.two_bit_row_bytes(), 600);
+        assert_eq!(h.two_bit_row_bytes() * 2, 1200, "two planes together");
     }
     #[test]
     fn checks_payload_multiplication_before_the_limit() {

@@ -454,8 +454,10 @@ the same shape and the same four levels, but it is our generated data rather tha
 HP's proprietary table.
 
 The item side is done with it: `PageGeometry`'s `bits_per_pixel` is what `ZJI_VIDEO_BPP`,
-`ZJI_VIDEO_X` and `ZJI_NBIE` are computed from, and the job layer sets it from the same option
-that selects the screening, so a two-bit page announces itself consistently.
+`ZJI_NBIE` and `ZJI_RASTER_X` are computed from, while `ZJI_VIDEO_X` stays the logical width.
+The two-bit image itself is aligned to 64 pixels, not the one-bit path's 128, and the job layer
+sets both from the same option that selects the screening, so a two-bit page announces itself
+consistently.
 
 That marker also picks the table: `ToneTables::for_page` takes the 400 dpi cell when `cupsCompression & 0x3ffe` is 400 and the 600 dpi one otherwise, which is what the bullet
 above says HP does with it, and the job layer tests both halves: the page marked 401 comes out
