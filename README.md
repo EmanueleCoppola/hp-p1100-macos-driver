@@ -147,6 +147,7 @@ Either route produces binaries that `scripts/verify-native.sh` reports as
 Build and test:
 
     ./scripts/build-native.sh
+    ./native/build-app.sh          # macOS printer utility
     rustup target add wasm32-wasip1 && ./scripts/test-wasm.sh
 
 Install (see docs/installation.md for what lands where, and why):

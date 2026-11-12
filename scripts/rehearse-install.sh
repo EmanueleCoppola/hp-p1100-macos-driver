@@ -73,8 +73,17 @@ echo 'rehearsing the install, into a scratch directory'
 [ -f "$REPO/assets/p1100.icns" ] || {
     echo 'error: build the icon first: scripts/make-icns.py' >&2; exit 2; }
 
+# Keep this rehearsal independent of the native app build. The production default remains
+# target/P1100 Utility.app; this tiny temporary bundle exercises the same copy and PPD paths.
+UTILITY_SOURCE="$work/P1100 Utility.app"
+mkdir -p "$UTILITY_SOURCE/Contents/MacOS"
+printf '%s\n' 'rehearsal utility bundle' >"$UTILITY_SOURCE/Contents/Info.plist"
+printf '%s\n' '#!/bin/sh' >"$UTILITY_SOURCE/Contents/MacOS/P1100Utility"
+printf '%s\n' '#!/bin/sh' >"$UTILITY_SOURCE/Contents/MacOS/p1100-inquire"
+chmod +x "$UTILITY_SOURCE/Contents/MacOS/P1100Utility" "$UTILITY_SOURCE/Contents/MacOS/p1100-inquire"
+
 # --- the install, with the two arguments that keep it out of everyone's way -------------
-if ! "$REPO/scripts/install.sh" --dest "$DEST" --no-queue --queue "$QUEUE" >"$work/install.log" 2>&1
+if ! P1100_UTILITY_APP="$UTILITY_SOURCE" "$REPO/scripts/install.sh" --dest "$DEST" --no-queue --queue "$QUEUE" >"$work/install.log" 2>&1
 then
     sed 's/^/    /' "$work/install.log" >&2
     echo 'error: install.sh failed' >&2
@@ -82,8 +91,8 @@ then
 fi
 
 # --- what should be there --------------------------------------------------------------
-for f in p1100-filter p1100-usbink p1100.ppd p1100.icns; do
-    [ -f "$DEST/$f" ] && ok "$f is in the destination" || bad "$f is in the destination" 'missing'
+for f in p1100-filter p1100-usbink p1100.ppd p1100.icns "P1100 Utility.app"; do
+    [ -e "$DEST/$f" ] && ok "$f is in the destination" || bad "$f is in the destination" 'missing'
 done
 [ -x "$DEST/p1100-filter" ] && ok 'the installed filter is executable' \
     || bad 'the installed filter is executable' 'not executable'
@@ -98,6 +107,9 @@ cmp -s "$DEST/p1100-usbink" "$REPO/target/release/p1100-usbink" \
 cmp -s "$DEST/p1100.icns" "$REPO/assets/p1100.icns" \
     && ok 'the installed icon is the built one' \
     || bad 'the installed icon is the built one' 'differs'
+diff -r "$UTILITY_SOURCE" "$DEST/P1100 Utility.app" >/dev/null \
+    && ok 'the installed utility app matches the build bundle' \
+    || bad 'the installed utility app matches the build bundle' 'differs'
 
 # The tone tables are HP's data, read out of HP's driver; on a machine without it the installer
 # says so and installs nothing there, which is the documented behaviour rather than a failure.
@@ -127,6 +139,9 @@ grep -q "^\*cupsFilter: \"application/vnd.cups-command 100 $DEST/p1100-usbink\""
 grep -q "^\*APPrinterIconPath: \"$DEST/p1100.icns\"$" "$DEST/p1100.ppd" \
     && ok 'the PPD points its icon into the destination' \
     || bad 'the PPD points its icon into the destination' 'no such line'
+grep -Fqx "*APPrinterUtilityPath: \"$DEST/P1100 Utility.app\"" "$DEST/p1100.ppd" \
+    && ok 'the PPD points its utility app into the destination' \
+    || bad 'the PPD points its utility app into the destination' 'no such line'
 
 # --- what should not have happened ------------------------------------------------------
 snapshot_system_dest "$system_after"

@@ -339,8 +339,8 @@ same job to this filter: CUPS's page-setup filter has already done the rotation.
   it against the installed one shows two added comment lines, the `*NickName` line and its
   sixteen localised `*.Translation NickName/` keys gaining a " (native ARM64)" suffix, the
   raster filter line repointed at our filter, `*APPrinterIconPath` repointed at the icns we
-  install, and three lines removed - HP's
-  `application/vnd.cups-command` filter, `*cupsCommands`, and `*APPrinterUtilityPath`.
+  install, HP's `application/vnd.cups-command` filter and `*cupsCommands` removed, and
+  `*APPrinterUtilityPath` repointed at the installed `P1100 Utility.app`.
   Nothing else, in 1297 lines. The command is in docs/installation.md, which carries the
   same table.
 - **HP's queue, files and receipts are untouched**, so the change is reversible and both

@@ -2,12 +2,14 @@
 
 ## What gets installed, and where
 
-Four required runtime files, two optional tone-table files, and a .p1100-installed ownership
-marker under a dedicated directory, plus one new CUPS queue:
+The filter, status utility, custom utility app, icon, generated PPD, two optional tone-table
+files, and a .p1100-installed ownership marker under a dedicated directory, plus one new CUPS
+queue:
 
     /Library/Printers/p1100/p1100-filter    our ARM64 CUPS filter
     /Library/Printers/p1100/p1100-usbink    the status/command filter
     /Library/Printers/p1100/p1100.ppd       generated PPD pointing at that filter
+    /Library/Printers/p1100/P1100 Utility.app custom printer utility app
     /Library/Printers/p1100/p1100-400.tones, p1100-600.tones
                                             optional copies of HP's exact tone tables, read
                                             out of the installed HP driver when it is present;
@@ -66,7 +68,7 @@ scripts/make-ppd.py reads the installed PPD and changes only the driver wiring:
 | the application/vnd.cups-raster filter line is repointed at our filter | HP's is x86_64 |
 | the application/vnd.cups-command filter line is repointed at our Rust command filter | it replaces HP's Intel-only usbink and reads the printer's USB EWS consumable report |
 | *cupsCommands is preserved | the command filter serves ReportLevels for the Supplies view |
-| *APPrinterUtilityPath is dropped | that is HP's utility app |
+| *APPrinterUtilityPath points at our installed P1100 Utility.app | so the printer's utility action opens our app |
 | *APPrinterIconPath is repointed at our icns | so the row shows a picture we ship, rather than one of HP's read out of HP's directory |
 | *NickName gains a " (native ARM64)" suffix, and the localised NickName translation keys follow it | so the two queues are distinguishable in the UI, without breaking localisation |
 | *OpenUI *p1100Grey is added, with a label in every language the PPD declares | the two-bit grey screening is ours rather than HP's, and a PPD that declares languages has to translate its own options - CUPS's conformance test fails every one that is missing. Screened2 is the default; the filter uses HP's tables when installed and a built-in compatible table otherwise |
@@ -79,6 +81,7 @@ installing anything - the script only reads, and writes a new file:
         /etc/cups/ppd/HP_LaserJet_Professional_P1102.ppd \
         /Library/Printers/p1100/p1100-filter /tmp/p1100.ppd \
         --icon /Library/Printers/p1100/p1100.icns \
+        --utility "/Library/Printers/p1100/P1100 Utility.app" \
         --default-grey Screened2                     # install.sh always selects this
     diff /etc/cups/ppd/HP_LaserJet_Professional_P1102.ppd /tmp/p1100.ppd
 
@@ -152,7 +155,16 @@ holds an absolute path and does not care which directory it names.
 
     ./scripts/build-native.sh      # a plain 'cargo build --release' also works if the
                                    # Xcode licence is accepted; see docs/testing.md
+    ./native/build-app.sh          # builds the printer utility app bundle
     sudo ./scripts/install.sh
+
+To add the utility to an existing p1100 queue without deleting the queue, build the app and run:
+
+    ./native/build-app.sh
+    sudo ./scripts/install-utility.sh HP_LaserJet_P1100_native
+
+This updates that queue's PPD and installs the app under `/Library/Printers/p1100`. The exact
+location of the utility action in System Settings still needs confirmation on the target macOS.
 
 Review the plan first, which needs no privileges and prints every command it would run:
 
@@ -203,7 +215,7 @@ guard against a mistyped path.
     sudo ./scripts/uninstall.sh
 
 That deletes the queue only after verifying its PPD points at our filter, removes the
-five known artifacts and ownership marker, and removes the directory only when empty.
+known driver artifacts, utility app and ownership marker, and removes the directory only when empty.
 Unrelated files are preserved. HP's queue, files and receipts are left alone.
 
 `uninstall.sh` takes the same `--dest` as the installer, and refuses to delete a path that is

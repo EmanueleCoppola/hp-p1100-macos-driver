@@ -22,6 +22,7 @@ REPO=$(cd "$(dirname "$0")/.." && pwd)
 FILTER="$REPO/target/release/p1100-filter"
 USBINK="$REPO/target/release/p1100-usbink"
 ICON="$REPO/assets/p1100.icns"
+UTILITY_APP=${P1100_UTILITY_APP:-$REPO/target/P1100 Utility.app}
 
 # Apple's /usr/bin/python3 is behind the Xcode licence gate, so picking it blind is what made
 # a dry run print "PPD generation would fail" and skip the artifact checks entirely - a check
@@ -42,7 +43,7 @@ MARKER=.p1100-installed
 usage() {
     cat <<EOF
 usage: $0 [--dry-run] [--force] [--queue NAME] [--source-queue NAME] [--device URI]
-             [--icon FILE.icns] [--dest DIR] [--no-queue]
+             [--icon FILE.icns] [--utility-app DIR] [--dest DIR] [--no-queue]
 
   --dry-run          print the commands instead of running them (no privileges needed)
   --force            replace an existing queue of the same name
@@ -50,6 +51,7 @@ usage: $0 [--dry-run] [--force] [--queue NAME] [--source-queue NAME] [--device U
   --source-queue N   HP queue to inherit the device URI and PPD from (default $SOURCE_QUEUE)
   --device URI       use this device URI instead of reading it from the source queue
   --icon FILE        printer icon to install and point the PPD at (default $ICON)
+  --utility-app DIR  utility app bundle to install (default $UTILITY_APP)
   --dest DIR         where to install            (default $DEST)
   --no-queue         install the files and stop; no lpadmin, no root needed
 EOF
@@ -63,6 +65,7 @@ while [ $# -gt 0 ]; do
         --source-queue) SOURCE_QUEUE=$2; shift ;;
         --device) DEVICE=$2; shift ;;
         --icon) ICON=$2; shift ;;
+        --utility-app) UTILITY_APP=$2; shift ;;
         --dest) DEST=$2; shift ;;
         --no-queue) NOQUEUE=1 ;;
         -h|--help) usage; exit 0 ;;
@@ -147,6 +150,8 @@ check_ppd() {
     # it is asserted directly: the row would otherwise show HP's picture, or none.
     grep -q "^\*APPrinterIconPath: \"$DEST/p1100.icns\"$" "$ppd" \
         || die "the generated PPD does not point *APPrinterIconPath at $DEST/p1100.icns"
+    grep -Fqx "*APPrinterUtilityPath: \"$DEST/P1100 Utility.app\"" "$ppd" \
+        || die "the generated PPD does not point *APPrinterUtilityPath at $DEST/P1100 Utility.app"
     if grep -E '^\*APPrinterIconPath:.*(/Library/Printers/hp|hp1100)' "$ppd" >/dev/null; then
         die "the generated PPD still points its icon into HP's installation"
     fi
@@ -154,9 +159,6 @@ check_ppd() {
     # installation, which cannot run on this machine at all.
     grep -E '^\*cupsFilter:.*(hpRaster\.bundle|/Library/Printers/hp)' "$ppd" \
         && die "the generated PPD still routes a filter into HP's installation"
-    for gone in '^\*APPrinterUtilityPath'; do
-        grep -q "$gone" "$ppd" && die "the generated PPD still carries a line matching $gone"
-    done
 
     # Compare against the source. Only these line kinds may differ; anything else is a bug in
     # the generator, not a cosmetic difference. The source is piped in rather than copied to a
@@ -223,13 +225,14 @@ if [ -e "$DEST" ] || [ -L "$DEST" ]; then
     [ -d "$DEST" ] && [ ! -L "$DEST" ] || die "refusing a non-directory or symlink destination: $DEST"
     if [ ! -f "$DEST/$MARKER" ] && {
         [ ! -f "$DEST/p1100-filter" ] || [ ! -f "$DEST/p1100-usbink" ] || [ ! -f "$DEST/p1100.ppd" ] ||
+        [ ! -d "$DEST/P1100 Utility.app" ] ||
         ! grep -Fq "*cupsFilter: \"application/vnd.cups-raster 100 $DEST/p1100-filter\"" "$DEST/p1100.ppd";
     }; then
         find "$DEST" -mindepth 1 -maxdepth 1 -print -quit | grep -q . \
             && die "refusing non-empty unowned destination $DEST"
     fi
 fi
-for f in "$MARKER" p1100-filter p1100-usbink p1100.ppd p1100.icns p1100-400.tones p1100-600.tones; do
+for f in "$MARKER" p1100-filter p1100-usbink p1100.ppd p1100.icns p1100-400.tones p1100-600.tones "P1100 Utility.app"; do
     [ ! -L "$DEST/$f" ] || die "refusing known install file that is a symlink: $DEST/$f"
 done
 
@@ -243,6 +246,17 @@ esac
 if [ "$DRY" = 0 ] && [ "$SYSTEM" = 1 ] && [ "$(id -u)" -ne 0 ]; then
     die "writing to $DEST and creating a queue need root; re-run with sudo
   (or rehearse the same steps in a scratch directory: --dest DIR --no-queue)"
+fi
+
+if [ -d "$UTILITY_APP" ] && [ ! -L "$UTILITY_APP" ] \
+    && [ -f "$UTILITY_APP/Contents/Info.plist" ] \
+    && [ -x "$UTILITY_APP/Contents/MacOS/P1100Utility" ] \
+    && [ -x "$UTILITY_APP/Contents/MacOS/p1100-inquire" ]; then
+    echo "utility app: $UTILITY_APP"
+elif [ "$DRY" = 1 ]; then
+    echo "note: $UTILITY_APP is missing required app files; a real run would stop here."
+else
+    die "utility app bundle $UTILITY_APP is incomplete, missing, or is a symlink"
 fi
 
 # --- check what we are installing -------------------------------------------
@@ -330,7 +344,7 @@ fi
 # --- act --------------------------------------------------------------------
 
 echo
-echo "1. installing the filter, the icon and the PPD into $DEST"
+echo "1. installing the filter, utility app, icon and PPD into $DEST"
 run mkdir -p "$DEST"
 if [ "$DRY" = 0 ] && [ ! -f "$DEST/$MARKER" ]; then
     run /usr/bin/install -m 0644 /dev/null "$DEST/$MARKER"
@@ -344,6 +358,8 @@ fi
 run /usr/bin/install -m 0755 $OWNER "$FILTER" "$DEST/p1100-filter"
 run /usr/bin/install -m 0755 $OWNER "$USBINK" "$DEST/p1100-usbink"
 run /usr/bin/install -m 0644 $OWNER "$ICON" "$DEST/p1100.icns"
+run rm -rf "$DEST/P1100 Utility.app"
+run /usr/bin/ditto "$UTILITY_APP" "$DEST/P1100 Utility.app"
 # Screened2 is always the default: the filter carries a compatible clustered-dot table, so it
 # does not need HP's files to work. When the HP driver is still installed the installer also
 # copies HP's exact tables beside the filter, and the filter prefers them for byte-for-byte
@@ -378,6 +394,7 @@ if [ "$DRY" = 1 ]; then
             trap 'rm -f "$probe_ppd"' EXIT
             "$PYTHON" "$REPO/scripts/make-ppd.py" "$SRC_PPD" "$DEST/p1100-filter" "$probe_ppd" \
                 --command-filter "$DEST/p1100-usbink" --icon "$DEST/p1100.icns" \
+                --utility "$DEST/P1100 Utility.app" \
                 --default-grey "$GREY_DEFAULT" || exit 1
             check_ppd "$probe_ppd"
         ) || die "the PPD could not be generated or did not pass its check"
@@ -385,6 +402,7 @@ if [ "$DRY" = 1 ]; then
 else
     run "$PYTHON" "$REPO/scripts/make-ppd.py" "$SRC_PPD" "$DEST/p1100-filter" "$DEST/p1100.ppd" \
         --command-filter "$DEST/p1100-usbink" --icon "$DEST/p1100.icns" \
+        --utility "$DEST/P1100 Utility.app" \
         --default-grey "$GREY_DEFAULT"
     # Before the queue is created, not after: a PPD CUPS cannot use must not reach lpadmin.
     check_ppd "$DEST/p1100.ppd"

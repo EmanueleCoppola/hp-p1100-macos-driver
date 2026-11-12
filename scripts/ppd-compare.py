@@ -79,7 +79,8 @@ def sources():
 def generate(dst, src):
     """Run the installer's generator exactly the way install.sh calls it."""
     cmd = [sys.executable, os.path.join(HERE, 'make-ppd.py'), src,
-           INSTALL_DIR + '/p1100-filter', dst, '--icon', INSTALL_DIR + '/p1100.icns']
+           INSTALL_DIR + '/p1100-filter', dst, '--icon', INSTALL_DIR + '/p1100.icns',
+           '--utility', INSTALL_DIR + '/P1100 Utility.app']
     proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if proc.returncode != 0:
         raise SystemExit('make-ppd.py failed:\n' + proc.stderr.decode('utf-8', 'replace'))

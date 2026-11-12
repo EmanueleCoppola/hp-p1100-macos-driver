@@ -39,6 +39,21 @@ echo keep >"$TMP/owned/user-file"
 "$REPO/scripts/uninstall.sh" --dest "$TMP/owned" >/dev/null
 [ -f "$TMP/owned/user-file" ]
 
+mkdir "$TMP/owned-app"
+echo marker >"$TMP/owned-app/.p1100-installed"
+ln -s "$TMP/unowned" "$TMP/owned-app/P1100 Utility.app"
+if "$REPO/scripts/uninstall.sh" --dry-run --dest "$TMP/owned-app" >/dev/null 2>&1; then
+    echo 'uninstall accepted a symlink utility app' >&2; exit 1
+fi
+
+mkdir "$TMP/incomplete-app"
+if "$REPO/scripts/install.sh" --no-queue --dest "$TMP/incomplete-install" --utility-app "$TMP/incomplete-app" >/dev/null 2>&1; then
+    echo 'install accepted an incomplete utility app' >&2; exit 1
+fi
+if "$REPO/scripts/install.sh" --dry-run --no-queue --dest "$TMP/owned-app" >/dev/null 2>&1; then
+    echo 'install accepted a symlink utility app destination' >&2; exit 1
+fi
+
 if "$REPO/scripts/uninstall.sh" --dry-run --dest "$TMP/owned/.." >/dev/null 2>&1; then
     echo 'uninstall accepted a path containing ..' >&2; exit 1
 fi

@@ -63,6 +63,7 @@ esac
 [ -d "$DEST" ] && [ ! -L "$DEST" ] || {
     [ ! -e "$DEST" ] || { echo "error: refusing a non-directory or symlink destination: $DEST" >&2; exit 1; }
 }
+[ ! -L "$DEST/P1100 Utility.app" ] || { echo "error: refusing symlink app bundle: $DEST/P1100 Utility.app" >&2; exit 1; }
 
 SYSTEM=0
 case "$DEST" in
@@ -98,6 +99,7 @@ if [ -d "$DEST" ]; then
     for f in "$MARKER" p1100-filter p1100-usbink p1100.ppd p1100.icns p1100-400.tones p1100-600.tones; do
         [ -e "$DEST/$f" ] && run rm -f "$DEST/$f"
     done
+    [ ! -e "$DEST/P1100 Utility.app" ] || run rm -rf "$DEST/P1100 Utility.app"
     if [ "$DRY" = 1 ]; then
         echo "   would rmdir $DEST if it is empty"
     else
