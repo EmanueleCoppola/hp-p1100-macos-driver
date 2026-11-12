@@ -14,9 +14,9 @@ writes is **byte-identical to the reference driver's** - wrapper, framing, item 
 geometry, compressed image and padding - for every option combination
 `scripts/reference-compare.py` covers; the compressed image is separately byte-identical to
 the reference encoder of the standard. The two-bit path HP's own driver uses for this printer is
-built too - its tone tables read out of the installed driver, the screening rule read out of its
-code, and the whole page checked against the reference encoder by `scripts/two-bit-compare.py` -
-behind an option, with the one-bit path still the default. Hardware validation accepted PJL
+built too - HP's tone tables when they are installed, a compatible generated table otherwise,
+the screening rule read out of its code, and the whole page checked against the reference
+encoder by `scripts/two-bit-compare.py` - and it is the default. Hardware validation accepted PJL
 and no-PJL jobs through Apple's USB backend and completed a document through the installed
 native CUPS queue; the remaining device questions are recorded in `docs/differences.md`.
 
@@ -165,9 +165,11 @@ Remove it again, leaving HP's installation untouched:
     ./scripts/uninstall.sh --dry-run
     sudo ./scripts/uninstall.sh
 
-That installs the filter, the printer icon, a generated PPD and the tone tables it reads into /Library/Printers/p1100, and creates a new
-queue alongside HP's. HP's installation is read but never written, SIP is untouched, and no
-kernel or system extension is involved.
+That installs the filter, the printer icon and a generated PPD into /Library/Printers/p1100,
+and creates a new queue alongside HP's. HP's exact tone tables are copied too when its driver
+is still installed; without them the filter uses its built-in compatible table. HP's
+installation is read but never written, SIP is untouched, and no kernel or system extension
+is involved.
 
 
 ## Using the command line tool and inspection scripts
@@ -321,9 +323,9 @@ Verified by execution, on real captured data where it matters:
   against 31,361,800 for the real thing - instead of refusing, so a queue installed from it
   would have printed the fallback page rather than reporting a problem.
 - **The install and the uninstall, executed.** `scripts/rehearse-install.sh` runs install.sh
-  with `--dest` in a scratch directory and `--no-queue`, so the copies and their modes, the two
-  tone tables read out of HP's driver, the PPD written into the destination and the checks on it,
-  and then the uninstall that removes the lot, all happen for real. Twenty-three assertions, which
+  with `--dest` in a scratch directory and `--no-queue`, so the copies and their modes, the
+  optional tone tables read out of HP's driver, the PPD written into the destination and the checks on it,
+  and then the uninstall that removes the lot, all happen for real. The assertions include that
   include that nothing was created at the system destination or in the print system, and the
   refusals around a recursive delete: an HP location, an Apple location, `/etc/cups`, `/`, a
   relative path, an empty one, and the system destination without root. What this does not reach
@@ -362,8 +364,9 @@ Verified by execution, on real captured data where it matters:
   only 0 and 255 screens to itself, so a one-bit job and a two-bit job of the same document are
   the same page, and a screened page survives the whole round trip - screen, encode into two
   planes, frame, reassemble, decode with the reference decoder - with identical samples. The
-  screening rule itself is read out of HP's driver (item 11 of `docs/differences.md`); what it
-  looks like on paper and whether the printer takes that framing are the observations left.
+  screening rule itself is read out of HP's driver (item 11 of `docs/differences.md`), and the
+  filter can generate a compatible table when HP's data is absent; what it looks like on paper
+  and whether the printer takes that framing are the observations left.
 - **The whole job, against a working driver.** `scripts/reference-compare.py` builds the
   open driver that supports this printer and requires our filter's output to be
   byte-identical to its, for the same page and options, once the clock-bearing

@@ -88,6 +88,11 @@ This project must be clean. Concretely:
 | **HP `rastertozjs` / `usbink`** | proprietary | Golden reference only. Must not be committed to the repo, and must not be redistributed. |
 | **CUPS** | Apache-2.0 (Apple's fork ships with macOS) | Fine to link to / call. Our filter is a separate program. |
 
+The grey tone tables are bytes from HP's proprietary `rastertozjs`, so they are not committed
+either. The installer copies them from a locally installed HP driver when it can, for exact
+parity; the filter also has a compatible clustered-dot table generated from its own code, which
+is what makes `Screened2` work on a machine that never had HP's driver.
+
 ### Test oracles
 
 Two GPL implementations are used **only** to check our own output. Neither is committed,

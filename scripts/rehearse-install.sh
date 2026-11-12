@@ -108,10 +108,15 @@ if [ -f "$DEST/p1100-400.tones" ] && [ -f "$DEST/p1100-600.tones" ]; then
         && ok 'both tone tables are the 12288-byte tables' \
         || bad 'both tone tables are the 12288-byte tables' "$four and $six bytes"
 else
-    grep -q 'no HP driver to read the tone tables' "$work/install.log" \
-        && ok 'no tone tables, and the installer said why' \
-        || bad 'no tone tables, and the installer said why' 'missing without a note'
+    grep -q 'built-in clustered-dot screening table' "$work/install.log" \
+        && ok 'no HP tables, and the installer named the built-in fallback' \
+        || bad 'no HP tables, and the installer named the built-in fallback' 'missing without a note'
 fi
+
+# Screened2 is safe without HP's files because the filter carries its own table.
+grep -q "^\\*Defaultp1100Grey: Screened2$" "$DEST/p1100.ppd" \
+    && ok 'the PPD defaults greys to Screened2' \
+    || bad 'the PPD defaults greys to Screened2' 'wrong or missing default'
 
 grep -q "^\*cupsFilter: \"application/vnd.cups-raster 100 $DEST/p1100-filter\"" "$DEST/p1100.ppd" \
     && ok 'the PPD points its raster filter into the destination' \

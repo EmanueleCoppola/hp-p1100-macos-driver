@@ -53,9 +53,10 @@ pub struct Options {
     /// `pjlJamRecovery`: true selects `AUTO`, false `OFF`.
     pub jam_recovery_auto: bool,
     /// The `p1100Grey` option this repository's PPD offers: `Screened2` asks for the two-bit
-    /// screening HP's driver does, `Mono1` (the default) for the one-bit thresholding the
-    /// reference driver sends. The tables themselves are the caller's to supply, because only
-    /// the filter knows where they are installed.
+    /// screening HP's driver does, `Mono1` for one-bit thresholding. The built-in value is
+    /// `false`; the generated PPD selects `Screened2`, and the filter either reads HP's exact
+    /// tables when installed or generates a compatible clustered-dot table. The tables
+    /// themselves are the caller's to supply, because only the filter knows where they live.
     pub screened: bool,
     /// Input tray, from the PPD's `InputSlot`.
     pub source: u32,

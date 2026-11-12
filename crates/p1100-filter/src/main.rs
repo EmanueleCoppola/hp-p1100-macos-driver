@@ -70,8 +70,8 @@ fn main() -> ExitCode {
     let input_file = args.get(6).filter(|p| !p.is_empty()).cloned();
 
     let mut opts = build_options(&options);
-    // The two-bit screening needs HP's tone tables, which are files rather than options: they
-    // live beside this binary, where install.sh puts them, or wherever P1100_TONES points.
+    // The two-bit screening uses HP's tone tables when they are installed beside this binary
+    // or at P1100_TONES, and otherwise the compatible table generated inside the filter.
     if opts.screened {
         match load_tone_tables() {
             Ok(tables) => opts.tone_tables = Some(tables),

@@ -2,14 +2,16 @@
 
 ## What gets installed, and where
 
-Five runtime files and a .p1100-installed ownership marker under a dedicated directory,
-plus one new CUPS queue:
+Four required runtime files, two optional tone-table files, and a .p1100-installed ownership
+marker under a dedicated directory, plus one new CUPS queue:
 
     /Library/Printers/p1100/p1100-filter    our ARM64 CUPS filter
+    /Library/Printers/p1100/p1100-usbink    the status/command filter
     /Library/Printers/p1100/p1100.ppd       generated PPD pointing at that filter
     /Library/Printers/p1100/p1100-400.tones, p1100-600.tones
-                                            the two tone tables the p1100Grey option needs,
-                                            read out of the installed HP driver
+                                            optional copies of HP's exact tone tables, read
+                                            out of the installed HP driver when it is present;
+                                            the filter has a compatible table built in
     /Library/Printers/p1100/p1100.icns      the picture the printer row shows
     CUPS queue: HP_LaserJet_P1100_native    new queue, inherits the existing device URI
 
@@ -67,7 +69,7 @@ scripts/make-ppd.py reads the installed PPD and changes only the driver wiring:
 | *APPrinterUtilityPath is dropped | that is HP's utility app |
 | *APPrinterIconPath is repointed at our icns | so the row shows a picture we ship, rather than one of HP's read out of HP's directory |
 | *NickName gains a " (native ARM64)" suffix, and the localised NickName translation keys follow it | so the two queues are distinguishable in the UI, without breaking localisation |
-| *OpenUI *p1100Grey is added, with a label in every language the PPD declares | the two-bit grey screening is ours rather than HP's, and a PPD that declares languages has to translate its own options - CUPS's conformance test fails every one that is missing |
+| *OpenUI *p1100Grey is added, with a label in every language the PPD declares | the two-bit grey screening is ours rather than HP's, and a PPD that declares languages has to translate its own options - CUPS's conformance test fails every one that is missing. Screened2 is the default; the filter uses HP's tables when installed and a built-in compatible table otherwise |
 
 Everything else is byte-for-byte the same file. You can see the exact diff before
 installing anything - the script only reads, and writes a new file:
@@ -76,7 +78,8 @@ installing anything - the script only reads, and writes a new file:
     $PYTHON scripts/make-ppd.py \
         /etc/cups/ppd/HP_LaserJet_Professional_P1102.ppd \
         /Library/Printers/p1100/p1100-filter /tmp/p1100.ppd \
-        --icon /Library/Printers/p1100/p1100.icns     # as install.sh calls it
+        --icon /Library/Printers/p1100/p1100.icns \
+        --default-grey Screened2                     # install.sh always selects this
     diff /etc/cups/ppd/HP_LaserJet_Professional_P1102.ppd /tmp/p1100.ppd
 
 Apple's /usr/bin/python3 is a shim that refuses to run until the Xcode licence is
@@ -186,7 +189,7 @@ Options:
 
 With `--dest` and `--no-queue` the whole install runs without privileges into a directory of
 your choosing, which is how `scripts/rehearse-install.sh` tries it out and takes it away again:
-the copies, the tone tables read out of HP's driver, the PPD and the checks on it, and then
+the copies, the optional tone tables read out of HP's driver, the PPD and the checks on it, and then
 `uninstall.sh --dest` removing the lot. What that cannot reach is the strict cupstestppd run,
 whose file checks want root-owned files; see docs/testing.md.
 

@@ -353,7 +353,9 @@ gated too.
 The same route reads the data rather than the code: `scripts/hp-tone-table.py` finds the
 grey tone tables by symbol, decodes them as the driver does, and checks the structure - entry
 0 black, entry 255 white, entries in between getting lighter - which is how item 11 of
-`docs/differences.md` was settled.
+`docs/differences.md` was settled. The same tables are compared with the built-in compatible
+table: `crates/p1100-raster` tests the generated one for the same shape and monotonic growth,
+and the PDF comparison showed it keeps the same light-grey detail.
 
 ## Hardware bring-up with no build at all
 
@@ -532,8 +534,9 @@ a cross-check against real captured rasters; both agree, and both land exactly o
 If the printer turns out to prefer what HP's own driver sends - two bits per pixel from a 12x12
 tone table, item 11 of `docs/differences.md` - the same backend invocation takes a two-bit job,
 and the README's "Making a two-bit page, the way HP's driver would" section is how it is built:
-the tone tables come out of the installed HP driver, the page is screened with them, and the
-image is framed with the page items that depth implies. One command does all of it -
+HP's tone tables come out of the installed driver when available, otherwise the filter's
+built-in table is used; the page is screened with whichever table applies and the image is
+framed with the page items that depth implies. One command does all of it -
 `p1100 raster-to-zjs RASTER OUT.zjs --2bit --tone-table /tmp/twobit/sdtahs10.bin` - and the
 longer recipe in the README, which uses the reference encoder as well, is what
 `scripts/two-bit-compare.py` holds that command to. That job is the one thing that settles
@@ -684,10 +687,10 @@ thirty-nine translation lines rather than three.
 ## The install and the uninstall, executed
 
 `scripts/rehearse-install.sh` runs install.sh with `--dest` pointed at a scratch directory and
-`--no-queue`, so every step except lpadmin happens for real: the copies and their modes, the two
-tone tables read out of HP's driver, the PPD written into the destination, the checks run on it,
-and then uninstall.sh taking the lot away again. It checks what landed - five files, the filter
-and the icon byte-identical to the build, both tone tables at their 12288 bytes, and the PPD's
+`--no-queue`, so every step except lpadmin happens for real: the copies and their modes, the
+optional tone tables read out of HP's driver, the PPD written into the destination, the checks run on it,
+and then uninstall.sh taking the lot away again. It checks what landed - the required files, the filter
+and the icon byte-identical to the build, both tone tables at their 12288 bytes when present, and the PPD's
 filter and icon paths inside the destination - what did not happen (`/Library/Printers/p1100`
 not created, the HP queue's device unchanged, no queue created) and that nothing is left behind.
 

@@ -16,6 +16,69 @@ pub const TONE_CELL: usize = 12;
 /// Bytes per cell row: twelve 2-bit values, padded to four bytes.
 pub const TONE_ROW_BYTES: usize = 4;
 
+/// The two screening tables built into the filter when HP's own files are not installed.
+///
+/// They have the same shape as HP's: 256 entries of a 12x12 two-bit cell. The pattern is a
+/// clustered-dot tile generated from four cluster centres on a 6x6 torus, repeated twice in
+/// each direction. That keeps the driver independent of HP's binary while preserving the
+/// four-level screening the printer expects; when HP's tables are present those are preferred
+/// because they are the exact patterns its own driver used.
+pub fn builtin_tone_tables() -> (Vec<u8>, Vec<u8>) {
+    (builtin_tone_table(0), builtin_tone_table(1))
+}
+
+/// Build one 12x12 clustered-dot table. `variant` only moves the cluster centres, which gives
+/// the 400 dpi and 600 dpi choices different screen phases.
+pub fn builtin_tone_table(variant: u8) -> Vec<u8> {
+    // Work in half-pixel coordinates so the centres can sit between pixels. The toroidal
+    // distance makes the 6x6 tile wrap and therefore repeat cleanly in the 12x12 cell.
+    let centres: [(i32, i32); 4] = if variant & 1 == 0 {
+        [(3, 3), (9, 3), (3, 9), (9, 9)]
+    } else {
+        [(1, 1), (7, 1), (1, 7), (7, 7)]
+    };
+    let axis_distance = |a: i32, b: i32| {
+        let d = (a - b).abs();
+        let d = d.min(12 - d);
+        d * d
+    };
+    let mut order: Vec<(i32, i32, i32)> = Vec::with_capacity(36);
+    for y in 0..6i32 {
+        for x in 0..6i32 {
+            let (hx, hy) = (x * 2, y * 2);
+            let distance = centres
+                .iter()
+                .map(|(cx, cy)| axis_distance(hx, *cx) + axis_distance(hy, *cy))
+                .min()
+                .unwrap_or(0);
+            order.push((distance, x, y));
+        }
+    }
+    order.sort_unstable();
+    let mut rank = [[0u8; 6]; 6];
+    for (r, (_, x, y)) in order.into_iter().enumerate() {
+        // Spread the 36 tile ranks over the 144 cells. All four copies of a tile position
+        // share a rank, which is what makes the 12x12 cell a 2x2 repeat of the 6x6 tile.
+        rank[y as usize][x as usize] = (r * 4) as u8;
+    }
+
+    let mut table = vec![0u8; TONE_TABLE_LEN];
+    for grey in 0..256usize {
+        let base = grey * TONE_CELL * TONE_ROW_BYTES;
+        for y in 0..TONE_CELL {
+            for x in 0..TONE_CELL {
+                let r = rank[y % 6][x % 6] as u32;
+                // level = floor(grey/255*3 + (143-rank)/144), clamped to 0..3. The rational
+                // form keeps every transition ordered without floating point.
+                let numerator = 3 * grey as u32 * 144 + (143 - r) * 255;
+                let level = (numerator / (255 * 144)).min(3) as u8;
+                table[base + y * TONE_ROW_BYTES + x / 4] |= level << (6 - 2 * (x % 4));
+            }
+        }
+    }
+    table
+}
+
 /// One pixel's level, with HP's driver's indexing.
 ///
 /// The table is indexed by the grey value first, then by the pixel's place in the cell: the
@@ -160,5 +223,39 @@ mod tests {
         let h = letter_mono_header(8, 1);
         let err = to_two_bit_planes(&h, &[0u8; 8], &vec![0u8; TONE_TABLE_LEN - 1]).unwrap_err();
         assert!(matches!(err, RasterError::ToneTableShort { .. }), "{err}");
+    }
+
+    #[test]
+    fn builtin_tables_have_hp_shape_and_grow_monotonically() {
+        for variant in 0..2 {
+            let table = builtin_tone_table(variant);
+            assert_eq!(table.len(), TONE_TABLE_LEN);
+            let cells = |grey: usize| -> Vec<Vec<u8>> {
+                (0..TONE_CELL)
+                    .map(|y| {
+                        (0..TONE_CELL)
+                            .map(|x| tone_level(&table, grey as u8, x, y))
+                            .collect()
+                    })
+                    .collect()
+            };
+            assert!(cells(0).iter().all(|row| row.iter().all(|v| *v == 0)));
+            assert!(cells(255).iter().all(|row| row.iter().all(|v| *v == 3)));
+
+            let mut previous = 0usize;
+            for grey in 0..=255 {
+                let light = cells(grey).iter().flatten().filter(|v| **v == 3).count();
+                assert!(light >= previous, "grey {grey} got darker");
+                previous = light;
+            }
+
+            // The cell is a 2x2 repeat of a 6x6 tile, like HP's tables.
+            let cell = cells(128);
+            for y in 0..TONE_CELL {
+                for x in 0..TONE_CELL {
+                    assert_eq!(cell[y][x], cell[y % 6][x % 6]);
+                }
+            }
+        }
     }
 }

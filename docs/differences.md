@@ -443,12 +443,15 @@ once in the library (`p1100_raster::to_two_bit_planes`, reachable as
 and our framing, and through the tool plus the reference encoder, has to come out the same job.
 That check earned its keep immediately - it caught the aligned columns past the page width being
 padded black rather than white, where the one-bit path's padding is white and a zeroed two-bit
-margin is not. It is in the filter too, behind the `p1100Grey` option - `Mono1` by default, `Screened2`
-to ask for this - which reads the two tables from beside its own binary or from `P1100_TONES`.
-The installer does both halves: `scripts/make-ppd.py` injects the option group, with `Mono1` as its
-default, and `scripts/install.sh` reads the two tables out of the installed HP driver and installs
-them beside the filter. A machine that has no HP driver left still gets a working queue: only
-the option that needs them fails, and the filter says so.
+margin is not. It is in the filter too, behind the `p1100Grey` option, which reads the two tables
+from beside its own binary or from `P1100_TONES`.
+The installer does both halves: `scripts/make-ppd.py` injects the option group, and
+`scripts/install.sh` reads the two tables out of the installed HP driver, installs them beside
+the filter, and makes `Screened2` the PPD default. `Mono1` remains selectable. A machine that
+has no HP driver left still gets the same default: the filter builds a compatible 12x12
+clustered-dot table internally and uses it when HP's files are absent. The built-in table has
+the same shape and the same four levels, but it is our generated data rather than a copy of
+HP's proprietary table.
 
 The item side is done with it: `PageGeometry`'s `bits_per_pixel` is what `ZJI_VIDEO_BPP`,
 `ZJI_VIDEO_X` and `ZJI_NBIE` are computed from, and the job layer sets it from the same option
@@ -465,20 +468,22 @@ The framing has now crossed the printer path: the native queue completed job 403
 `zjs::BandWriter` flags - `sendPlaneItem`, `sendStartPlaneChunk` and `sendEndPlaneChunk` -
 which are what a two-bit implementation has to settle. The tone tables are HP's own data, so
 a legitimate implementation reads them out of the user's installed driver:
-`scripts/hp-tone-table.py --out DIR` writes them. The transfer is accepted; the threshold
-remains the default until the printed grey quality is compared with HP's output.
+`scripts/hp-tone-table.py --out DIR` writes them. A visual comparison on 2026-11-12 settled
+the default: on an eBay order PDF with light grey text, the dashed rule and a pale logo, the
+one-bit path sent everything above grey 128 to white, so the light text and much of the logo
+disappeared; the same page screened through `_sdtahs10` kept them. The generated PPD now
+defaults to `Screened2` unconditionally, and the built-in table keeps that choice working on
+a machine where HP's driver is no longer installable.
 
 So the compression is verified here and the conversion is written and checked against the
 tables, the page items follow from the depth, and the two-bit framing is accepted by the
-attached printer. Only the visual comparison waits for human inspection.
+attached printer. The light-grey comparison above is the visual result; what remains is only
+the physical print on paper.
 
-One observation settles whether the two-bit difference matters in practice: print a graded fill
-or antialiased text and compare it with the same page through HP's queue while that still runs.
-If ours looks worse in a way someone would notice, the work is the two-bit path above - and the
-same comparison can be made against our own queue once the two-bit page can be sent, because a
-bi-level page screens to itself: the tables take grey 0 to level 0 and grey 255 to level 3, so a
-one-bit job and a two-bit job of the same document are the same page and the difference between
-them is the depth and nothing else.
+The observation has now been made, and it is the reason the default changed: the one-bit path
+lost light antialiased text and pale imagery, while the two-bit path kept them. A bi-level page
+still screens to itself - the tables take grey 0 to level 0 and grey 255 to level 3 - so the
+difference being compared is the depth and the intermediate tones.
 
 ## 12. The job now ends when the printer says the page is out. CONFIRMED in the reference
 
@@ -517,7 +522,7 @@ Each one maps to an observation the hardware test makes:
 | 5, duplex | job 404 completed after the printer-side wait; inspect the prompt and physical sheet order on a future run to settle whether host-side pairing is needed |
 | 6, media codes | whether a non-plain-paper job prints correctly, or jams or misfeeds |
 | 10, media source | settled on hardware: the PPD's `Manual` marker caused attention for ordinary jobs, so the native default is DMBIN 1 and explicit `InputSlot=Manual` remains DMBIN 4 |
-| 11, grey conversion | job 403 with `p1100Grey=Screened2` completed through CUPS; visual tone/edge quality still needs inspection against HP's queue |
+| 11, grey conversion | settled: Screened2 keeps the light grey detail that Mono1 thresholds away, and its built-in table makes it the default even without HP's driver |
 | 12, job completion | that the row in Print Center stays until the sheet is out, and that a printer which reports nothing still ends the job, after the 90-second silence warning |
 
 Everything else that used to be listed as uncertain - the wrapper text, the item sets and

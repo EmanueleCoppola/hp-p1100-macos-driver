@@ -31,6 +31,7 @@ built-in conversion rules - a queue that prints the wrong raster rather than ref
 Usage:
     python3 scripts/make-ppd.py <source.ppd[.gz]> <filter-path> <out.ppd>
                                 [--command-filter PATH] [--suffix " (native ARM64)"] [--icon PATH.icns]
+                                [--default-grey Mono1|Screened2]
 """
 
 import gzip
@@ -92,7 +93,7 @@ def languages(stripped):
     return seen
 
 
-def screening(langs):
+def screening(langs, default='Screened2'):
     """The grey-screening group, with a label in every language the source PPD declares.
 
     The labels are not decoration: once a PPD declares languages, cupstestppd fails it for
@@ -105,7 +106,7 @@ def screening(langs):
         '*%% page through the printer-specific tone tables the installer puts beside the filter.',
         '*OpenUI *p1100Grey/Grey Screening: PickOne',
         '*OrderDependency: 10 AnySetup *p1100Grey',
-        '*Defaultp1100Grey: Mono1',
+        '*Defaultp1100Grey: %s' % default,
         '*p1100Grey Mono1/One bit, thresholded: ""',
         '*p1100Grey Screened2/Two bits, screened: ""',
     ]
@@ -120,7 +121,8 @@ def screening(langs):
     return lines
 
 
-def rewrite(data, filter_path, suffix, icon_path=None, command_filter=None):
+def rewrite(data, filter_path, suffix, icon_path=None, command_filter=None,
+            default_grey='Screened2'):
     crlf = b'\r\n' in data
     eol = b'\r\n' if crlf else b'\n'
     lines = data.split(b'\n')
@@ -210,8 +212,10 @@ def rewrite(data, filter_path, suffix, icon_path=None, command_filter=None):
         '*%% Only the driver-wiring lines differ from the source; device data is unchanged.',
     ]
     # The one option that is ours rather than HP's: the two-bit grey screening this driver can
-    # do and HP's PPD has no way to ask for (docs/differences.md item 11). Mono1 is the default,
-    # so a queue that sets nothing sends exactly what the reference driver sends.
+    # do and HP's PPD has no way to ask for (docs/differences.md item 11). Screened2 is the
+    # default because that is what HP's own driver does with this PPD's compression markers;
+    # the filter prefers HP's exact tables when installed and otherwise generates a compatible
+    # clustered-dot table, so the choice does not depend on HP's driver being present.
     # When the source declares no *PPD-Adobe at all, one is written rather than leaving the
     # file malformed; both PPDs this is meant for have it, so this only ever fires on a source
     # nothing else would accept either.
@@ -219,7 +223,7 @@ def rewrite(data, filter_path, suffix, icon_path=None, command_filter=None):
     # Our own lines are ASCII apart from the translations, which go out as UTF-8 - the same way
     # the source PPD stores its own Korean and Chinese labels. Source lines round-trip byte for
     # byte through latin1, which is why they are not re-encoded the same way.
-    body += [l.encode('utf-8') for l in header + screening(languages(stripped))]
+    body += [l.encode('utf-8') for l in header + screening(languages(stripped), default_grey)]
     body += [l.encode('latin1') for l in out]
     result = eol.join(body)
     # Preserve whether the source ended with a newline rather than always adding one.
@@ -242,12 +246,18 @@ def main(argv):
     if '--command-filter' in argv:
         command_filter = argv[argv.index('--command-filter') + 1]
         args = [a for a in args if a != command_filter]
+    default_grey = 'Screened2'
+    if '--default-grey' in argv:
+        default_grey = argv[argv.index('--default-grey') + 1]
+        args = [a for a in args if a != default_grey]
+        if default_grey not in ('Mono1', 'Screened2'):
+            raise SystemExit('--default-grey must be Mono1 or Screened2')
     if len(args) != 3:
         print(__doc__)
         return 2
     src, filter_path, dst = args
     data = read_maybe_gz(src)
-    out = rewrite(data, filter_path, suffix, icon, command_filter)
+    out = rewrite(data, filter_path, suffix, icon, command_filter, default_grey)
     with open(dst, 'wb') as f:
         f.write(out)
     print('wrote %s (%d bytes) from %s' % (dst, len(out), src))

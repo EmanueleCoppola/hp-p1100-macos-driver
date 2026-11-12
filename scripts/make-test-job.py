@@ -211,7 +211,7 @@ def pjl_prologue(density, econo, timestamp):
         b'@PJL USTATUS TIMED = 30\n',
         b'@PJL SET JOBATTR="JobAttr4=%s"' % timestamp.encode(),
         b'\x00',
-        UEL,
+        b'@PJL ENTER LANGUAGE=ZJS\n',
     ]
     return b''.join(lines)
 

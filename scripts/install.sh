@@ -141,6 +141,8 @@ check_ppd() {
         || die "the generated PPD does not point its command filter at $DEST/p1100-usbink"
     grep -q '^\*cupsCommands: "ReportLevels"' "$ppd" \
         || die "the generated PPD does not offer ReportLevels"
+    grep -q "^\\*Defaultp1100Grey: $GREY_DEFAULT" "$ppd" \
+        || die "the generated PPD does not default p1100Grey to $GREY_DEFAULT"
     # The icon is the one line that names a file of ours outside this check's usual reach, so
     # it is asserted directly: the row would otherwise show HP's picture, or none.
     grep -q "^\*APPrinterIconPath: \"$DEST/p1100.icns\"$" "$ppd" \
@@ -342,10 +344,11 @@ fi
 run /usr/bin/install -m 0755 $OWNER "$FILTER" "$DEST/p1100-filter"
 run /usr/bin/install -m 0755 $OWNER "$USBINK" "$DEST/p1100-usbink"
 run /usr/bin/install -m 0644 $OWNER "$ICON" "$DEST/p1100.icns"
-# The two tone tables the two-bit grey screening uses. They are HP data, so the installer
-# reads them out of the HP driver on this machine rather than carrying them here. A machine
-# without that driver still gets a working queue: only p1100Grey=Screened2 would fail, and
-# the filter says so when it is asked for it.
+# Screened2 is always the default: the filter carries a compatible clustered-dot table, so it
+# does not need HP's files to work. When the HP driver is still installed the installer also
+# copies HP's exact tables beside the filter, and the filter prefers them for byte-for-byte
+# parity with HP's own screening.
+GREY_DEFAULT=Screened2
 if [ "$PYTHON_OK" = 1 ] && [ -f "$REPO/scripts/hp-tone-table.py" ]; then
     tones_tmp=$(mktemp -d -t p1100-tones) || die "cannot create a temporary directory"
     if "$PYTHON" "$REPO/scripts/hp-tone-table.py" --out "$tones_tmp" >/dev/null 2>&1 \
@@ -353,17 +356,17 @@ if [ "$PYTHON_OK" = 1 ] && [ -f "$REPO/scripts/hp-tone-table.py" ]; then
         run /usr/bin/install -m 0644 $OWNER "$tones_tmp/sdtahs10.bin" "$DEST/p1100-400.tones"
         run /usr/bin/install -m 0644 $OWNER "$tones_tmp/sdtahr10.bin" "$DEST/p1100-600.tones"
     else
-        echo "note: no HP driver to read the tone tables from, so this queue will not offer"
-        echo "      the two-bit grey screening. Everything else is unaffected."
+        echo "note: no HP driver to read the tone tables from; the filter will use its"
+        echo "      built-in clustered-dot screening table instead."
     fi
     rm -f "$tones_tmp/sdtahs10.bin" "$tones_tmp/sdtahr10.bin"
     rmdir "$tones_tmp" 2>/dev/null || true
 fi
 
 echo
-echo "   tone tables: an unprivileged copy is generated from the installed HP driver and"
-echo "                installed as p1100-400.tones and p1100-600.tones, which is what"
-echo "                p1100Grey=Screened2 reads."
+echo "   tone tables: HP's exact tables are copied from the installed HP driver when it is"
+echo "                present. Without it, Screened2 uses the compatible table built into the"
+echo "                filter, so no HP file is required."
 if [ "$DRY" = 1 ]; then
     # Generate the PPD somewhere harmless and check it, so a dry run says something about
     # the artifact as well as about the commands.
@@ -374,13 +377,15 @@ if [ "$DRY" = 1 ]; then
         (
             trap 'rm -f "$probe_ppd"' EXIT
             "$PYTHON" "$REPO/scripts/make-ppd.py" "$SRC_PPD" "$DEST/p1100-filter" "$probe_ppd" \
-                --command-filter "$DEST/p1100-usbink" --icon "$DEST/p1100.icns" || exit 1
+                --command-filter "$DEST/p1100-usbink" --icon "$DEST/p1100.icns" \
+                --default-grey "$GREY_DEFAULT" || exit 1
             check_ppd "$probe_ppd"
         ) || die "the PPD could not be generated or did not pass its check"
     fi
 else
     run "$PYTHON" "$REPO/scripts/make-ppd.py" "$SRC_PPD" "$DEST/p1100-filter" "$DEST/p1100.ppd" \
-        --command-filter "$DEST/p1100-usbink" --icon "$DEST/p1100.icns"
+        --command-filter "$DEST/p1100-usbink" --icon "$DEST/p1100.icns" \
+        --default-grey "$GREY_DEFAULT"
     # Before the queue is created, not after: a PPD CUPS cannot use must not reach lpadmin.
     check_ppd "$DEST/p1100.ppd"
 fi

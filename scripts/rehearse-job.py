@@ -154,9 +154,11 @@ def check_levers(raster_path, options, work, zc):
     """
     lines = []
 
-    def job_with(overrides, name):
+    def job_with(overrides, name, job_options=None):
         path = os.path.join(work, 'lever-%s.zjs' % name)
-        code, stderr, _ = run_filter(raster_path, options, path, env_overrides=overrides)
+        code, stderr, _ = run_filter(raster_path,
+                                     options if job_options is None else job_options,
+                                     path, env_overrides=overrides)
         if code != 0:
             raise Lever('the filter exited %d with %s: %s'
                         % (code, ' '.join('%s=%s' % kv for kv in overrides.items()), stderr))
@@ -189,7 +191,11 @@ def check_levers(raster_path, options, work, zc):
     # selects manual feed.
     if os.path.exists(PPD):
         items = {}
-        for kind, event in zc.semantic_view(job_with({'PPD': PPD}, 'ppd-defaults'))['events']:
+        # The PPD defaults are what a job that names no options gets, so this one is run
+        # without the options the caller passed to the rehearsal. Otherwise an explicit
+        # InputSlot=Manual on the command line would be compared against the native default.
+        for kind, event in zc.semantic_view(
+                job_with({'PPD': PPD}, 'ppd-defaults', ''))['events']:
             if kind == 'chunk' and event['op'] == 'START_PAGE':
                 items = event['items']
                 break
@@ -318,21 +324,43 @@ def check_ppd_option_coverage(ppd_path=None):
 
 
 def check_screened(raster_path, work, zc):
-    """p1100Grey=Screened2, the option that asks for HP's two-bit screening.
+    """p1100Grey=Screened2, the option that asks for the two-bit screening.
 
-    It needs the tone tables, which install.sh puts beside the filter and P1100_TONES points at
-    here, so both halves are checked: with them the page carries ZJI_VIDEO_BPP 2 and two
-    bi-level image entities, and without them the job stops with an error naming the file -
-    rather than quietly printing the one-bit page the job did not ask for.
+    The filter carries a compatible clustered-dot table, so the option works without HP's
+    driver; HP's tables are still preferred when they are present. An explicit P1100_TONES
+    that points at nothing is a configuration error and must be shouted about rather than
+    silently replaced by the built-in table.
     """
     lines = []
     out = os.path.join(work, 'screened.zjs')
-    code, stderr, _ = run_filter(raster_path, 'p1100Grey=Screened2', out)
+
+    def job_bits(env_overrides=None):
+        code, stderr, _ = run_filter(raster_path, 'p1100Grey=Screened2', out,
+                                     env_overrides=env_overrides)
+        if code != 0:
+            raise Lever('the filter exited %d with Screened2: %s' % (code, stderr))
+        items = {}
+        for kind, event in zc.semantic_view(open(out, 'rb').read())['events']:
+            if kind == 'chunk' and event['op'] == 'START_PAGE':
+                items = event['items']
+                break
+        return (str(items.get('VIDEO_BPP')).split()[0],
+                str(items.get('NBIE')).split()[0])
+
+    got, nbie = job_bits()
+    if got != '2' or nbie != '2':
+        raise Lever('the built-in table should make the page two bits per pixel in two '
+                    'entities, but it carries VIDEO_BPP %s and NBIE %s' % (got, nbie))
+    lines.append('without HP tables, the built-in table carries VIDEO_BPP 2 and NBIE 2')
+
+    empty = os.path.join(work, 'no-tones')
+    code, stderr, _ = run_filter(raster_path, 'p1100Grey=Screened2', out,
+                                 env_overrides={'P1100_TONES': empty})
     if code == 0:
-        raise Lever('p1100Grey=Screened2 produced a job even though no tone table was reachable')
+        raise Lever('an explicit P1100_TONES without tables was silently ignored')
     if 'tones' not in stderr:
         raise Lever('the failure does not name the tone table it wanted: %r' % stderr)
-    lines.append('with no tables reachable, Screened2 stops and names the file it needs')
+    lines.append('an explicit P1100_TONES without tables fails and names the file it wants')
 
     # The tables go directly in the scratch directory: the harness removes its files at the
     # end and has no patience for a subdirectory.
@@ -345,21 +373,10 @@ def check_screened(raster_path, work, zc):
     for src, dst in (('sdtahs10.bin', 'p1100-400.tones'), ('sdtahr10.bin', 'p1100-600.tones')):
         shutil.copyfile(os.path.join(tables, src), os.path.join(tables, dst))
 
-    code, stderr, _ = run_filter(raster_path, 'p1100Grey=Screened2', out,
-                                 env_overrides={'P1100_TONES': tables})
-    if code != 0:
-        raise Lever('the filter exited %d with the tables in place: %s' % (code, stderr))
-    items = {}
-    for kind, event in zc.semantic_view(open(out, 'rb').read())['events']:
-        if kind == 'chunk' and event['op'] == 'START_PAGE':
-            items = event['items']
-            break
-    got = str(items.get('VIDEO_BPP')).split()[0]
-    nbie = str(items.get('NBIE')).split()[0]
+    got, nbie = job_bits({'P1100_TONES': tables})
     if got != '2' or nbie != '2':
-        raise Lever('Screened2 should make the page two bits per pixel in two entities, but it '
-                    'carries VIDEO_BPP %s and NBIE %s' % (got, nbie))
-    lines.append('with the tables reachable, the page carries VIDEO_BPP 2 and NBIE 2')
+        raise Lever('with HP tables, the page carries VIDEO_BPP %s and NBIE %s' % (got, nbie))
+    lines.append('with HP tables reachable, the page still carries VIDEO_BPP 2 and NBIE 2')
     return lines
 
 def run_filter(raster_path, options, out_path, raw=False, env_overrides=None):
