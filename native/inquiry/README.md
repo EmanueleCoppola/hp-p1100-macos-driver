@@ -1,4 +1,4 @@
-# Read-only USB settings inquiry
+# USB settings inquiry and information pages
 
 Standalone macOS command-line helper. No UI, Swift package, Cargo manifest,
 installer, existing transport, or settings writer changes are required.
@@ -20,6 +20,21 @@ Invoke on a background worker, supplying the associated CUPS queue name:
 ```sh
 target/inquiry/p1100-inquire --queue HP_LaserJet_P1100_native
 ```
+
+The same helper can send one whitelisted information-page command directly over
+the guarded USB interface:
+
+```sh
+target/inquiry/p1100-inquire --queue HP_LaserJet_P1100_native --page demo
+```
+
+`--page` accepts only `demo`, `configuration`, `supplyStatus`, or `cleaning`.
+These are equivalent to `P1100SettingsBackend.pageJob(for:)` in
+`native/backend/SettingsBackend.swift`. A successful invocation means the
+single USB write and interface close succeeded; it does not confirm the page
+finished printing. These commands request physical printer output or a cleaning
+cycle. A successful page invocation exits 0 with no stdout. The helper tests
+never send them to a real printer.
 
 Success is exit 0 and one JSON object on stdout:
 
@@ -85,9 +100,13 @@ does not poll or retry automatically.
   handles, including every failure path. Retain exclusive access for the full
   transaction.
 
-The implementation follows the existing Rust usbink legacy transport, using
-the SDK's typed C IOUSBLib/CFUUID declarations rather than another manually
-maintained Rust vtable. This adds no third-party dependencies. Apple's
+The page mode shares the same local queue, identity, idle-job, exclusive-open,
+endpoint and cleanup guards. It rechecks guards after opening, sends exactly one
+fixed payload with a 1-second write timeout, never reads a reply or retries, and
+closes only an interface opened by this process. Arbitrary command input is not
+accepted. The implementation follows the existing Rust usbink legacy
+transport, using the SDK's typed C IOUSBLib/CFUUID declarations rather than
+another manually maintained Rust vtable. This adds no third-party dependencies. Apple's
 [IOUSBLib header](https://github.com/apple-oss-distributions/IOUSBFamily/blob/main/IOUSBFamily/Headers/IOUSBLib.h)
 documents exclusive-open and timeout behavior.
 

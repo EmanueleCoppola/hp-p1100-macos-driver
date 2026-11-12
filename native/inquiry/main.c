@@ -173,10 +173,10 @@ static const char *status_message(enum inquiry_status status) {
     case INQUIRY_OK: return "ok";
     case INQUIRY_NO_DEVICE: return "no matching USB printer is attached";
     case INQUIRY_BUSY: return "printer interface or CUPS is busy; try later";
-    case INQUIRY_TIMEOUT: return "inquiry timed out; values remain unknown";
+    case INQUIRY_TIMEOUT: return "USB transfer timed out; the command may have been sent";
     case INQUIRY_UNSUPPORTED: return "firmware did not support an inquiry";
     case INQUIRY_IDENTITY: return "queue/device identity missing, changed, or ambiguous";
-    default: return "inquiry failed; values remain unknown";
+    default: return "USB operation failed";
     }
 }
 
@@ -191,11 +191,16 @@ static void json_string(const char *s) {
 
 int main(int argc, char **argv) {
     if (argc == 2 && !strcmp(argv[1], "--help")) {
-        puts("Usage: p1100-inquire --queue NAME\nReads QUIETMODE, POWERSAVETIME and INACTIVEOFFTIME; never changes settings.");
+        puts("Usage: p1100-inquire --queue NAME [--page demo|configuration|supplyStatus|cleaning]\n"
+             "Without --page, reads settings. With --page, sends one fixed PJL page command.");
         return 0;
     }
-    if (argc != 3 || strcmp(argv[1], "--queue") || !*argv[2] || strlen(argv[2]) > 127) {
-        fputs("Usage: p1100-inquire --queue NAME\n", stderr);
+    enum inquiry_page page;
+    bool send_page = argc == 5 && !strcmp(argv[3], "--page")
+        && inquiry_page_parse(argv[4], &page);
+    if ((argc != 3 && !send_page) || strcmp(argv[1], "--queue") || !*argv[2]
+        || strlen(argv[2]) > 127) {
+        fputs("Usage: p1100-inquire --queue NAME [--page demo|configuration|supplyStatus|cleaning]\n", stderr);
         return INQUIRY_USAGE;
     }
     /* Pin to the local scheduler; ignore CUPS_SERVER and remote client.conf defaults. */
@@ -228,13 +233,13 @@ int main(int argc, char **argv) {
         CFUUIDGetUUIDBytes(kIOUSBInterfaceInterfaceID182), (LPVOID *)&s.usb);
     IODestroyPlugInInterface(plugin);
     if (queried || !s.usb) { status = INQUIRY_IO; goto done; }
-    char values[INQUIRY_COUNT][32] = {{0}};
     struct inquiry_transport transport = {
         &s, guard, open_interface, write_inquiry, read_reply, close_interface, now_ms
     };
-    status = inquiry_run(&transport, values);
+    char values[INQUIRY_COUNT][32] = {{0}};
+    status = send_page ? inquiry_send_page(&transport, page) : inquiry_run(&transport, values);
     /* Emit a complete result only after every response and a successful close. */
-    if (!status) {
+    if (!status && !send_page) {
         fputs("{\"serial\":", stdout);
         json_string(s.target.serial);
         printf(",\"QUIETMODE\":\"%s\",\"POWERSAVETIME\":%lu,\"INACTIVEOFFTIME\":%lu}\n",

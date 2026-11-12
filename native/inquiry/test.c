@@ -9,7 +9,8 @@ struct fake {
     size_t chunk, offset;
     uint64_t time, advance;
     const char *reply;
-    bool zero_read, over_report;
+    bool zero_read, over_report, page;
+    enum inquiry_page page_kind;
 };
 static enum inquiry_status fake_guard(void *ctx) {
     struct fake *f = ctx;
@@ -23,7 +24,16 @@ static enum inquiry_status fake_open(void *ctx) {
 }
 static enum inquiry_status fake_write(void *ctx, const void *bytes, uint32_t n, uint32_t ms) {
     struct fake *f = ctx;
-    assert(ms == INQUIRY_TIMEOUT_MS && f->writes < INQUIRY_COUNT);
+    assert(ms == INQUIRY_TIMEOUT_MS);
+    if (f->page) {
+        char expected[128];
+        size_t length = inquiry_page_job(f->page_kind, expected, sizeof expected);
+        assert(length == n && !memcmp(bytes, expected, n));
+        assert(!memchr(bytes, '\f', n));
+        f->writes++;
+        return f->write_error;
+    }
+    assert(f->writes < INQUIRY_COUNT);
     char expected[96];
     snprintf(expected, sizeof expected, "\033%%-12345X@PJL INQUIRE %s\n\033%%-12345X",
              inquiry_names[f->writes]);
@@ -70,6 +80,55 @@ static enum inquiry_status run(struct fake *f) {
         assert(!strcmp(values[1], "15") && !strcmp(values[2], "15"));
     }
     return status;
+}
+
+static enum inquiry_status run_page(struct fake *f, enum inquiry_page page) {
+    struct inquiry_transport io = {
+        f, fake_guard, fake_open, fake_write, fake_read, fake_close, fake_now
+    };
+    f->page = true;
+    f->page_kind = page;
+    return inquiry_send_page(&io, page);
+}
+
+static void pages(void) {
+    const char *names[] = { "demo", "configuration", "supplyStatus", "cleaning" };
+    const char *jobs[] = {
+        "\033%-12345X@PJL SET LANG=\n@PJL SET TESTPAGE=DEMOPAGE\n\033%-12345X",
+        "\033%-12345X@PJL SET LANG=\n@PJL SET TESTPAGE=SELFTEST\n\033%-12345X",
+        "\033%-12345X@PJL SET LANG=\n@PJL SET TESTPAGE=SUPPLIES\n\033%-12345X",
+        "\033%-12345X@PJL CLEANPRINTER\n\033%-12345X"
+    };
+    for (unsigned i = 0; i < 4; i++) {
+        enum inquiry_page page = INQUIRY_PAGE_DEMO;
+        assert(inquiry_page_parse(names[i], &page) && (unsigned)page == i);
+        char actual[128];
+        size_t length = inquiry_page_job(page, actual, sizeof actual);
+        assert(length == strlen(jobs[i]) && !memcmp(actual, jobs[i], length));
+        struct fake f = {0};
+        assert(run_page(&f, page) == INQUIRY_OK);
+        assert(f.guards == 2 && f.opens == 1 && f.writes == 1 && !f.reads && f.closes == 1);
+    }
+    const char *invalid[] = { "", "Demo", "clean", "demo\n@PJL SET X=Y", "configuration " };
+    enum inquiry_page page;
+    for (size_t i = 0; i < sizeof invalid / sizeof *invalid; i++)
+        assert(!inquiry_page_parse(invalid[i], &page));
+    char job[128];
+    assert(!inquiry_page_job((enum inquiry_page)99, job, sizeof job));
+    struct fake f = {0};
+    assert(run_page(&f, (enum inquiry_page)99) == INQUIRY_USAGE);
+    assert(!f.guards && !f.opens && !f.writes && !f.closes);
+
+    f = (struct fake){.reject_guard = 1, .guard_error = INQUIRY_BUSY};
+    assert(run_page(&f, INQUIRY_PAGE_DEMO) == INQUIRY_BUSY && !f.opens && !f.writes && !f.closes);
+    f = (struct fake){.reject_guard = 2, .guard_error = INQUIRY_IDENTITY};
+    assert(run_page(&f, INQUIRY_PAGE_DEMO) == INQUIRY_IDENTITY && f.opens == 1 && !f.writes && f.closes == 1);
+    f = (struct fake){.write_error = INQUIRY_TIMEOUT};
+    assert(run_page(&f, INQUIRY_PAGE_DEMO) == INQUIRY_TIMEOUT && f.writes == 1 && f.closes == 1);
+    f = (struct fake){.open_error = INQUIRY_BUSY};
+    assert(run_page(&f, INQUIRY_PAGE_DEMO) == INQUIRY_BUSY && f.opens == 1 && !f.writes && !f.closes);
+    f = (struct fake){.close_error = INQUIRY_IO};
+    assert(run_page(&f, INQUIRY_PAGE_DEMO) == INQUIRY_IO && f.writes == 1 && f.closes == 1);
 }
 
 static void identities(void) {
@@ -187,7 +246,8 @@ static void transactions(void) {
 int main(void) {
     identities();
     replies();
+    pages();
     transactions();
-    puts("inquiry tests passed: identity, responses, fragmentation, busy/timeout/disconnect, cleanup, no mutation");
+    puts("inquiry tests passed: identity, responses, four fixed pages, no retries, fragmentation, guards and cleanup");
     return 0;
 }

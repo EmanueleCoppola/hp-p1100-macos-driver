@@ -13,6 +13,8 @@ enum inquiry_status {
     INQUIRY_IO = 7, INQUIRY_IDENTITY = 8
 };
 enum { INQUIRY_COUNT = 3, INQUIRY_CAPACITY = 4096, INQUIRY_TIMEOUT_MS = 1000 };
+enum inquiry_page { INQUIRY_PAGE_DEMO, INQUIRY_PAGE_CONFIGURATION,
+                    INQUIRY_PAGE_SUPPLY_STATUS, INQUIRY_PAGE_CLEANING };
 static const char *const inquiry_names[] = {
     "QUIETMODE", "POWERSAVETIME", "INACTIVEOFFTIME"
 };
@@ -131,6 +133,42 @@ struct inquiry_transport {
     enum inquiry_status (*close)(void *);
     uint64_t (*now_ms)(void *);
 };
+
+static bool inquiry_page_parse(const char *name, enum inquiry_page *page) {
+    static const char *const names[] = { "demo", "configuration", "supplyStatus", "cleaning" };
+    if (!name) return false;
+    for (unsigned i = 0; i < sizeof names / sizeof *names; i++)
+        if (!strcmp(name, names[i])) { *page = (enum inquiry_page)i; return true; }
+    return false;
+}
+
+static size_t inquiry_page_job(enum inquiry_page page, char *job, size_t capacity) {
+    static const char *const commands[] = {
+        "SET LANG=\n@PJL SET TESTPAGE=DEMOPAGE",
+        "SET LANG=\n@PJL SET TESTPAGE=SELFTEST",
+        "SET LANG=\n@PJL SET TESTPAGE=SUPPLIES",
+        "CLEANPRINTER"
+    };
+    if ((unsigned)page >= sizeof commands / sizeof *commands) return 0;
+    int length = snprintf(job, capacity, "%s@PJL %s\n%s", inquiry_uel,
+                          commands[page], inquiry_uel);
+    return length > 0 && (size_t)length < capacity ? (size_t)length : 0;
+}
+
+static enum inquiry_status inquiry_send_page(struct inquiry_transport *io,
+                                              enum inquiry_page page) {
+    char job[128];
+    size_t length = inquiry_page_job(page, job, sizeof job);
+    if (!length) return INQUIRY_USAGE;
+    enum inquiry_status result = io->guard(io->context);
+    if (result) return result;
+    result = io->open(io->context);
+    if (result) return result;
+    result = io->guard(io->context);
+    if (!result) result = io->write(io->context, job, (uint32_t)length, INQUIRY_TIMEOUT_MS);
+    enum inquiry_status closed = io->close(io->context);
+    return result ? result : closed;
+}
 
 static enum inquiry_status inquiry_run(struct inquiry_transport *io,
                                        char values[INQUIRY_COUNT][32]) {

@@ -136,8 +136,31 @@ struct UtilityWindow: View {
     }
 
     private func printPage(_ page: P1100SettingsBackend.Page) {
-        let job = P1100SettingsBackend.pageJob(for: page)
-        submit([job], progress: "Sending page to the print queue…", success: "CUPS accepted the page job. Printing has not been verified.", failure: "Could not send page")
+        let selectedQueue = queue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !selectedQueue.isEmpty, !submitting else { return }
+        let name: String
+        switch page {
+        case .cleaning: name = "cleaning"
+        case .demo: name = "demo"
+        case .configuration: name = "configuration"
+        case .supplyStatus: name = "supplyStatus"
+        }
+        submitting = true
+        status = "Sending page to the printer…"
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                _ = try runHelper(arguments: ["--queue", selectedQueue, "--page", name])
+                DispatchQueue.main.async {
+                    submitting = false
+                    status = "Page command sent to the printer. Printing has not been verified."
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    submitting = false
+                    status = "Could not send page: \(error.localizedDescription)"
+                }
+            }
+        }
     }
 
     private func submit(_ jobs: [Data], progress: String, success: String, failure: String) {
@@ -251,10 +274,14 @@ struct UtilityWindow: View {
     }
 
     private func inquire(queue: String) throws -> EcoSMARTValues {
+        try JSONDecoder().decode(EcoSMARTValues.self, from: runHelper(arguments: ["--queue", queue]))
+    }
+
+    private func runHelper(arguments: [String]) throws -> Data {
         let executable = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/p1100-inquire")
         let process = Process()
         process.executableURL = executable
-        process.arguments = ["--queue", queue]
+        process.arguments = arguments
         let output = Pipe()
         process.standardOutput = output
         process.standardError = output
@@ -265,7 +292,7 @@ struct UtilityWindow: View {
             let detail = String(decoding: response, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
             throw NSError(domain: "P1100Utility.Inquire", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: detail.isEmpty ? "Helper exited with status \(process.terminationStatus)." : detail])
         }
-        return try JSONDecoder().decode(EcoSMARTValues.self, from: response)
+        return response
     }
 }
 
