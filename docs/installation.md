@@ -61,7 +61,8 @@ the PPD is the whole discovery mechanism. That is also why HP's drivers install 
 
 HP's PPD already describes this printer correctly - media sizes, resolutions, duplex,
 imageable areas, all of it - and there is no reason to re-author that data. So
-scripts/make-ppd.py reads the installed PPD and changes only the driver wiring:
+scripts/make-ppd.py reads the installed PPD, changes the driver wiring and normalizes six
+page-size choice names while preserving their dimensions and printable areas:
 
 | change | why |
 |---|---|
@@ -71,9 +72,11 @@ scripts/make-ppd.py reads the installed PPD and changes only the driver wiring:
 | *APPrinterUtilityPath points at our installed P1100 Utility.app | so the printer's utility action opens our app |
 | *APPrinterIconPath is repointed at our icns | so the row shows a picture we ship, rather than one of HP's read out of HP's directory |
 | *NickName gains a " (native ARM64)" suffix, and the localised NickName translation keys follow it | so the two queues are distinguishable in the UI, without breaking localisation |
+| six page-size identifiers use CUPS's standard names | eliminates inherited size-name warnings; the filter accepts both old and new names |
 | *OpenUI *p1100Grey is added, with a label in every language the PPD declares | the two-bit grey screening is ours rather than HP's, and a PPD that declares languages has to translate its own options - CUPS's conformance test fails every one that is missing. Screened2 is the default; the filter uses HP's tables when installed and a built-in compatible table otherwise |
 
-Everything else is byte-for-byte the same file. You can see the exact diff before
+Other device data is preserved. Existing saved presets that refer to an old page-size name
+may need to be recreated after installing the updated PPD. You can see the exact diff before
 installing anything - the script only reads, and writes a new file:
 
     PYTHON=/opt/homebrew/bin/python3.13
@@ -84,6 +87,10 @@ installing anything - the script only reads, and writes a new file:
         --utility "/Library/Printers/p1100/P1100 Utility.app" \
         --default-grey Screened2                     # install.sh always selects this
     diff /etc/cups/ppd/HP_LaserJet_Professional_P1102.ppd /tmp/p1100.ppd
+
+The six old/new size pairs can be checked against the original PPD and the built filter with
+`scripts/test-ppd-sizes.py SOURCE.ppd GENERATED.ppd --filter target/release/p1100-filter`.
+This compares CUPS raster geometry and pixels, as well as the emitted printer paper codes.
 
 Apple's /usr/bin/python3 is a shim that refuses to run until the Xcode licence is
 accepted, hence the PYTHON= above. install.sh warns about that rather than failing

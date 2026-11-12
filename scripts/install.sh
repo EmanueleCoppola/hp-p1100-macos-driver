@@ -169,7 +169,16 @@ check_ppd() {
         *)    decompress=cat ;;
     esac
     changes=$("$decompress" "$SRC_PPD" | diff - "$ppd" 2>/dev/null | grep -cE '^[<>]' || true)
-    unexpected=$("$decompress" "$SRC_PPD" | ppd_diff "$ppd")
+    # Compare against the source with only the agreed page-size key renames applied.
+    # Keep all other PPD data under the existing strict diff check.
+    normalized=$(mktemp -t p1100-normalized-ppd) || die "cannot create a temporary PPD"
+    if ! "$decompress" "$SRC_PPD" | "$PYTHON" "$REPO/scripts/make-ppd.py" --normalize-sizes > "$normalized"; then
+        rm -f "$normalized"
+        die "cannot normalize source PPD for comparison"
+    fi
+    [ -s "$normalized" ] || { rm -f "$normalized"; die "normalized source PPD is empty"; }
+    unexpected=$(ppd_diff "$ppd" < "$normalized")
+    rm -f "$normalized"
     # Fail closed: if the comparison produced nothing at all then it did not run - the source
     # could not be read, or the helper is missing - and an empty result would otherwise read
     # exactly like a clean one.
@@ -201,7 +210,7 @@ check_ppd() {
     else
         echo "   note: no /usr/bin/cupstestppd on this machine, so only the diff was checked"
     fi
-    echo "   PPD checks out: only the driver wiring lines differ from $SRC_PPD"
+    echo "   PPD checks out: only driver wiring and canonical size names differ from $SRC_PPD"
 }
 
 # --- safety rails -----------------------------------------------------------

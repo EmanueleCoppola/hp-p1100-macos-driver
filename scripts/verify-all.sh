@@ -88,6 +88,14 @@ run 'peak memory does not grow with the job' "$PY" scripts/memory-check.py
 # that never ran.
 run 'PPD the installer would write' env PYTHON="$PY" ./scripts/install.sh --dry-run --no-queue
 run 'PPD the installer writes, through CUPS' "$PY" scripts/ppd-compare.py
+check_normalized_sizes() {
+    src=/etc/cups/ppd/HP_LaserJet_Professional_P1102.ppd
+    [ -f "$src" ] || src=/Library/Printers/PPDs/Contents/Resources/hp1100.ppd.gz
+    "$PY" scripts/make-ppd.py "$src" /Library/Printers/p1100/p1100-filter "$TMP/sizes.ppd" \
+        || return 1
+    "$PY" scripts/test-ppd-sizes.py "$src" "$TMP/sizes.ppd" --filter target/release/p1100-filter
+}
+run 'normalized paper sizes through CUPS' check_normalized_sizes
 run 'install and uninstall, in a scratch directory' ./scripts/rehearse-install.sh
 run 'uninstall, dry run' ./scripts/uninstall.sh --dry-run
 run 'script guard regressions' ./scripts/test-script-guards.sh

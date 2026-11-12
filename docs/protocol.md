@@ -203,8 +203,10 @@ reference driver sends and what `scripts/reference-compare.py` covers.
 
 CUPS puts the PPD's `*PageSize` choice name into the raster header - measured by running
 every size this PPD declares through `cupsfilter` - so the mapping from a job to a code is
-name-based, and the names are the PPD's own: `B5JIS`, `EnvDL`, `16K197x273mm`, `8.5x13Custom`
-and so on. The codes come from the reference driver's table, which is keyed on the same names,
+name-based. The table below uses HP's original names; the generated PPD normalizes six choices
+to CUPS standard names. The filter accepts both spellings, including `B5JIS`/`B5`,
+`Monarch`/`EnvMonarch`, and `8.5x13Custom`/`FanFoldGermanLegal`. The codes come from the
+reference driver's table, which is keyed on the original names,
 and each entry below was checked against it **by page geometry** rather than by name.
 
 | PPD `PageSize` | code | | PPD `PageSize` | code |

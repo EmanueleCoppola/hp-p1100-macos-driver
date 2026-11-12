@@ -40,19 +40,21 @@ pub fn paper_code(page_size_name: &str) -> Option<u32> {
         paper::ENV_C5
     } else if name.eq_ignore_ascii_case("envisob5") || name.eq_ignore_ascii_case("envb5") {
         paper::ENV_B5
-    } else if name.eq_ignore_ascii_case("monarch") {
+    } else if name.eq_ignore_ascii_case("monarch") || name.eq_ignore_ascii_case("envmonarch") {
         paper::ENV_MONARCH
     } else if name.eq_ignore_ascii_case("postcard") {
         paper::POSTCARD
     } else if name.eq_ignore_ascii_case("doublepostcard") {
         paper::DOUBLE_POSTCARD
-    } else if name.eq_ignore_ascii_case("16k197x273mm") {
+    } else if name.eq_ignore_ascii_case("16k197x273mm") || name.eq_ignore_ascii_case("197x273mm") {
         paper::K16_197X273
-    } else if name.eq_ignore_ascii_case("16k184x260mm") {
+    } else if name.eq_ignore_ascii_case("16k184x260mm") || name.eq_ignore_ascii_case("184x260mm") {
         paper::K16_184X260
-    } else if name.eq_ignore_ascii_case("16k195x270mm") {
+    } else if name.eq_ignore_ascii_case("16k195x270mm") || name.eq_ignore_ascii_case("195x270mm") {
         paper::K16_195X270
-    } else if name.eq_ignore_ascii_case("8.5x13custom") {
+    } else if name.eq_ignore_ascii_case("8.5x13custom")
+        || name.eq_ignore_ascii_case("fanfoldgermanlegal")
+    {
         paper::FANFOLD_GERMAN_LEGAL
     } else if name.eq_ignore_ascii_case("custom") {
         paper::CUSTOM
@@ -77,6 +79,29 @@ mod tests {
         assert_eq!(paper_code("A5"), Some(paper::A5));
         assert_eq!(paper_code("Env DL"), Some(paper::ENV_DL));
         assert_eq!(paper_code("Custom.100x200"), None);
+    }
+
+    #[test]
+    fn canonical_page_names_keep_their_printer_codes() {
+        for (legacy, canonical, code) in [
+            ("16K197x273mm", "197x273mm", paper::K16_197X273),
+            ("16K184x260mm", "184x260mm", paper::K16_184X260),
+            ("16K195x270mm", "195x270mm", paper::K16_195X270),
+            (
+                "8.5x13Custom",
+                "FanFoldGermanLegal",
+                paper::FANFOLD_GERMAN_LEGAL,
+            ),
+            ("Monarch", "EnvMonarch", paper::ENV_MONARCH),
+            ("B5JIS", "B5", paper::B5),
+        ] {
+            assert_eq!(paper_code(legacy), Some(code), "legacy name {legacy}");
+            assert_eq!(
+                paper_code(canonical),
+                Some(code),
+                "canonical name {canonical}"
+            );
+        }
     }
 
     /// Every `*PageSize` the printer's PPD declares must map to a code, and to the code the
