@@ -5,12 +5,17 @@ import P1100SettingsBackend
 
 @main
 struct P1100UtilityApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     init() { PrinterAssociation.shared.register() }
 
     var body: some Scene {
-        WindowGroup("P1100 Utility") { UtilityWindow().frame(minWidth: 690, minHeight: 400) }
+        Window("P1100 Utility", id: "utility") { UtilityWindow().frame(minWidth: 690, minHeight: 400) }
             .defaultSize(width: 740, height: 440)
     }
+}
+
+private final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 }
 
 struct UtilityWindow: View {
