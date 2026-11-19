@@ -16,6 +16,7 @@
 mod job;
 mod raster;
 mod send;
+mod tones;
 mod zjs;
 
 use std::env;
@@ -25,6 +26,7 @@ use std::process::ExitCode;
 use crate::job::{raster_to_zjs, test_page};
 use crate::raster::{raster_info, raster_to_mono1};
 use crate::send::send;
+use crate::tones::tones;
 use crate::zjs::{wrap, zjs_dump};
 
 fn main() -> ExitCode {
@@ -42,6 +44,7 @@ fn main() -> ExitCode {
         "zjs-dump" => zjs_dump(rest),
         "wrap" => wrap(rest),
         "send" => send(rest),
+        "tones" => tones(rest),
         "-h" | "--help" | "help" => {
             println!("{USAGE}");
             Ok(())
@@ -70,6 +73,7 @@ USAGE:
   p1100 wrap --bih <file> [--bid <file> ...] --width W --height H --resolution R [--resolution-y R]
              [--bits N] [--paper-code N] [--no-pjl] -o <out.zjs>
   p1100 send <job.zjs> [--device URI] [--queue NAME] [--timeout SECS] [--dry-run]
+  p1100 tones <dir>    write p1100-400.tones and p1100-600.tones into <dir>
 
 NOTES:
   raster-to-zjs and test-page produce complete, printable jobs: the page image is JBIG
