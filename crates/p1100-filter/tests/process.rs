@@ -10,6 +10,8 @@ use std::time::Duration;
 use std::os::fd::AsRawFd;
 #[cfg(target_os = "macos")]
 use std::os::unix::process::CommandExt;
+#[cfg(target_os = "macos")]
+use std::os::unix::process::ExitStatusExt;
 
 #[cfg(target_os = "macos")]
 unsafe extern "C" {
@@ -117,7 +119,7 @@ fn invalid_input_fails_without_printer_output() {
 
 #[cfg(target_os = "macos")]
 #[test]
-fn sigterm_sends_soft_reset_and_stops_a_blocked_job() {
+fn sigterm_stops_a_blocked_job_without_a_side_channel_reset() {
     let path = std::env::temp_dir().join(format!("p1100-filter-side-{}", std::process::id()));
     let side = std::fs::File::create(&path).unwrap();
     let side_fd = side.as_raw_fd();
@@ -151,8 +153,14 @@ fn sigterm_sends_soft_reset_and_stops_a_blocked_job() {
     std::fs::remove_file(path).unwrap();
     std::fs::remove_file(raster_path).unwrap();
 
-    assert_eq!(output.status.code(), Some(1));
-    assert_eq!(&side_data[..4], &[1, 0, 0, 0]);
+    // HP's filter has no SIGTERM handler: CUPS kills it and the backend closes the USB
+    // endpoint. Reproducing that is what avoids a soft reset racing the endpoint close while
+    // the printer is already stopped for paper.
+    assert_eq!(output.status.signal(), Some(15));
+    assert!(
+        side_data.is_empty(),
+        "the filter wrote to the CUPS side channel while being canceled"
+    );
 }
 
 #[cfg(target_os = "macos")]
@@ -204,12 +212,104 @@ fn the_job_stays_open_until_the_printer_reports_the_end_of_the_job() {
     assert!(output.status.success(), "{stderr}");
     assert!(stderr.contains("INFO: encoded 1 page(s)"), "{stderr}");
     assert!(!stderr.contains("WARNING:"), "{stderr}");
-    // The filter adds nothing after the job it encoded: the wait happens with stdout still
-    // open, but no second PJL session follows the job's own epilogue.
+    // The status session is closed the way HP's endJob does it, after the printer has said
+    // the job is out. Leaving it open keeps the printer volunteering status into the next
+    // job, including one that was canceled while waiting for paper.
     assert!(
-        output.stdout.ends_with(&p1100_protocol::pjl_epilogue()),
-        "the job does not end with its own PJL epilogue"
+        output.stdout.ends_with(&p1100_protocol::pjl_status_off()),
+        "the job does not close the printer status session"
     );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_canceled_job_ends_the_wait_immediately() {
+    use std::os::unix::net::UnixStream;
+    use std::time::Instant;
+
+    // The printer says CANCELED when it has given up on a job, which is what a paper-out
+    // condition does once the job is canceled at the host. Treating that as progress used to
+    // hold the queue for the full silence timeout, and the next job waited behind it.
+    let (mut printer, backchannel) = UnixStream::pair().unwrap();
+    let backchannel_fd = backchannel.as_raw_fd();
+    let mut cmd = filter();
+    cmd.env("P1100_COMPLETION_TIMEOUT_MS", "5000")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    unsafe {
+        cmd.pre_exec(move || {
+            if dup2(backchannel_fd, 3) == -1 {
+                Err(std::io::Error::last_os_error())
+            } else {
+                Ok(())
+            }
+        });
+    }
+    let mut child = cmd.spawn().unwrap();
+    child.stdin.take().unwrap().write_all(&raster()).unwrap();
+    printer
+        .write_all(b"@PJL USTATUS JOB\r\nSTART\r\n@PJL USTATUS JOB\r\nCANCELED\r\n")
+        .unwrap();
+
+    let started = Instant::now();
+    let output = child.wait_with_output().unwrap();
+    let elapsed = started.elapsed();
+    drop(printer);
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+    assert!(elapsed < Duration::from_secs(3), "waited {elapsed:?}");
+    assert!(stderr.contains("printer canceled the job"), "{stderr}");
+    assert!(
+        output.stdout.ends_with(&p1100_protocol::pjl_status_off()),
+        "the canceled job did not close the printer status session"
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_stale_canceled_status_does_not_end_the_next_job() {
+    use std::os::unix::net::UnixStream;
+
+    // The backend can still forward the previous job's final status when the next job
+    // starts. A CANCELED with no START for this job is that leftover, not this job's result.
+    let (mut printer, backchannel) = UnixStream::pair().unwrap();
+    let backchannel_fd = backchannel.as_raw_fd();
+    let mut cmd = filter();
+    cmd.env("P1100_COMPLETION_TIMEOUT_MS", "5000")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    unsafe {
+        cmd.pre_exec(move || {
+            if dup2(backchannel_fd, 3) == -1 {
+                Err(std::io::Error::last_os_error())
+            } else {
+                Ok(())
+            }
+        });
+    }
+    let mut child = cmd.spawn().unwrap();
+    child.stdin.take().unwrap().write_all(&raster()).unwrap();
+    printer
+        .write_all(b"@PJL USTATUS JOB\r\nCANCELED\r\n")
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(750));
+    assert!(
+        child.try_wait().unwrap().is_none(),
+        "a stale CANCELED ended the next job"
+    );
+
+    printer
+        .write_all(b"@PJL USTATUS JOB\r\nSTART\r\n@PJL USTATUS JOB\r\nEND\r\n")
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    drop(printer);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+    assert!(!stderr.contains("printer canceled the job"), "{stderr}");
+    assert!(output.stdout.ends_with(&p1100_protocol::pjl_status_off()));
 }
 
 #[cfg(target_os = "macos")]
@@ -249,4 +349,8 @@ fn a_printer_that_only_reports_device_status_does_not_hold_the_queue() {
     assert!(output.status.success(), "{stderr}");
     assert!(stderr.contains("WARNING:"), "{stderr}");
     assert!(stderr.contains("INFO: encoded 1 page(s)"), "{stderr}");
+    assert!(
+        output.stdout.ends_with(&p1100_protocol::pjl_status_off()),
+        "the job did not close the printer status session after the timeout"
+    );
 }

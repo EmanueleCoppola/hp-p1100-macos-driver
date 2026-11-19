@@ -13,9 +13,10 @@
 //! The raster arrives on stdin, or in `file` when CUPS supplies one, and the encoded job
 //! is written to stdout. Diagnostics go to stderr, which CUPS records in the job log.
 
+mod backchannel;
 mod completion;
 mod options;
-mod side_channel;
+#[cfg_attr(target_os = "wasi", allow(dead_code))]
 mod status;
 mod tones;
 mod writer;
@@ -24,13 +25,12 @@ use std::env;
 use std::fs;
 use std::io::{self, Write};
 use std::process::ExitCode;
-use std::sync::atomic::Ordering;
 
 use p1100_job::encode_raster_stream;
+use p1100_protocol::pjl_status_off;
 
 use crate::completion::wait_for_printing_to_finish;
 use crate::options::build_options;
-use crate::side_channel::{install_signal_handlers, request_backend_reset, CANCELED};
 use crate::tones::load_tone_tables;
 use crate::writer::Counting;
 
@@ -49,7 +49,6 @@ To drive the pipeline outside CUPS, use the offline tools instead:
   scripts/preflight-usb.py    what the USB bus and CUPS see
   scripts/rehearse-job.py     the whole CUPS -> filter boundary, with no printer";
 fn main() -> ExitCode {
-    install_signal_handlers();
     let args: Vec<String> = env::args().collect();
     // CUPS passes five job arguments and an optional filename. A shorter one is running by
     // hand, and without this guard the filter writes half a job to stdout before failing, which
@@ -91,35 +90,34 @@ fn main() -> ExitCode {
         None => encode_raster_stream(io::stdin().lock(), &mut out, &opts),
     };
 
-    if CANCELED.load(Ordering::Relaxed) {
-        request_backend_reset();
-        return fail("job canceled by CUPS");
-    }
-
     match result {
         Ok(pages) => {
-            if CANCELED.load(Ordering::Relaxed) {
-                request_backend_reset();
-                return fail("job canceled by CUPS");
-            }
             if let Err(e) = out.flush() {
                 return fail(&format!("writing the job to stdout: {e}"));
             }
+            let job_bytes = out.bytes();
             // Hold the job open until the printer reports that the sheets are out. CUPS keeps
             // a job running while one of its filters still is, which is what leaves the row
             // in Print Center until the page has actually printed.
             if opts.pjl {
-                if let Err(e) = wait_for_printing_to_finish() {
-                    return fail(&e);
+                let completion = wait_for_printing_to_finish();
+                if completion.waited() {
+                    // HP's endJob writes `@PJL USTATUSOFF` and a final UEL after its reader
+                    // returns. Without that, the printer keeps volunteering job, page and
+                    // device status after the job is over; a later job that is canceled can
+                    // then leave those reports arriving with no reader, which is what used
+                    // to make the following job look wedged. The write happens only when a
+                    // CUPS backchannel existed, so offline output stays a plain job.
+                    if let Err(e) = out.write_all(&pjl_status_off()).and_then(|_| out.flush()) {
+                        eprintln!("WARNING: closing the printer status session: {e}");
+                    }
                 }
             }
             eprintln!(
                 // INFO rather than DEBUG: this becomes the queue's last state message, so a
                 // successful job leaves a trace of what the filter did with it
                 "INFO: encoded {pages} page(s), {} bytes (pjl={}, encoding={:?})",
-                out.bytes(),
-                opts.pjl,
-                opts.encoding
+                job_bytes, opts.pjl, opts.encoding
             );
             ExitCode::SUCCESS
         }

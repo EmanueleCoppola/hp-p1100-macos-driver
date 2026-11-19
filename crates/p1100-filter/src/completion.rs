@@ -3,17 +3,37 @@
 #[cfg(not(target_os = "wasi"))]
 use std::env;
 #[cfg(not(target_os = "wasi"))]
-use std::sync::atomic::Ordering;
-#[cfg(not(target_os = "wasi"))]
 use std::time::{Duration, Instant};
 
 #[cfg(not(target_os = "wasi"))]
-use crate::side_channel::{
-    backchannel_is_open, poll_backchannel, read_backchannel, request_backend_reset, CANCELED,
-    POLLHUP, POLLIN, POLLNVAL,
+use crate::backchannel::{
+    backchannel_is_open, poll_backchannel, read_backchannel, POLLHUP, POLLIN, POLLNVAL,
 };
 #[cfg(not(target_os = "wasi"))]
-use crate::status::{job_status_progress, pjl_job_finished};
+use crate::status::{job_started, job_status, job_status_progress, JobStatus};
+
+/// How the wait ended. This is reported rather than treated as success or failure: a job the
+/// printer canceled, and a printer that stopped talking, both still have to leave the status
+/// session closed so the next job starts from a known state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(target_os = "wasi", allow(dead_code))]
+pub(crate) enum Completion {
+    /// No CUPS backchannel was open, so there was nothing to wait for.
+    NotWaited,
+    /// The printer reported `USTATUS JOB` `END`.
+    Finished,
+    /// The printer reported `USTATUS JOB` `CANCELED`.
+    Canceled,
+    /// The printer stopped reporting about the job before saying it had finished.
+    TimedOut,
+}
+
+impl Completion {
+    /// Whether this process actually held the job open for printer status.
+    pub(crate) fn waited(self) -> bool {
+        !matches!(self, Self::NotWaited)
+    }
+}
 
 /// How long the filter waits for the next sign that the job is moving. The printer reports
 /// each page as the sheet comes out, so this bounds silence about the job rather than the
@@ -48,50 +68,48 @@ fn completion_silence_timeout() -> Duration {
         .map(Duration::from_millis)
         .unwrap_or(COMPLETION_SILENCE_TIMEOUT)
 }
-/// Wait on the CUPS backchannel until the printer reports that the job has been printed.
+
+/// Wait on the CUPS backchannel until the printer reports what happened to the job.
 ///
 /// This is what HP's filter does at the end of a job: it writes `@PJL EOJ`, joins its
 /// backchannel reader, and only then sends `@PJL USTATUSOFF`. Because CUPS keeps a job open
 /// while one of its filters is still running, that wait is what holds the row in Print Center
 /// until the sheets are out instead of letting it disappear when the bytes reach the printer.
 ///
-/// The prologue asks for `@PJL USTATUS JOB = ON`, so the printer reports `START` and, once
-/// the pages are printed, `END`. Returns whether that `END` was seen. The wait is bounded in
-/// two ways, because a filter that waits can hold a queue open: by silence about the job, and
-/// by a total limit on the job itself.
+/// `CANCELED` is terminal here. It is what the printer says when it has given up on the job,
+/// for example after a paper-out condition was cleared by canceling; continuing to wait for an
+/// `END` that will never come is what used to leave the next job queued behind it.
 #[cfg(not(target_os = "wasi"))]
-fn wait_for_printer_completion() -> Result<bool, String> {
+fn wait_for_printer_completion() -> Completion {
     let started = Instant::now();
     let silence = completion_silence_timeout();
     let mut status = Vec::new();
     let mut previous_tail: Vec<u8> = Vec::new();
+    let mut saw_start = false;
     // The first sign gets the shorter limit: silence before the printer has said anything
     // about the job means it is not going to, and the queue must not wait it out.
     let mut deadline = started + silence.min(COMPLETION_FIRST_SIGNAL_TIMEOUT);
     loop {
-        if CANCELED.load(Ordering::Relaxed) {
-            request_backend_reset();
-            return Err("job canceled by CUPS".into());
-        }
         if Instant::now() >= deadline || started.elapsed() >= COMPLETION_HARD_LIMIT {
-            return Ok(false);
+            return Completion::TimedOut;
         }
         let (ready, revents) = poll_backchannel(1000);
         if ready < 0 {
-            continue; // SIGTERM/SIGPIPE set CANCELED and the next iteration reports it.
+            continue; // an interrupted poll is retried; the deadline bounds it
         }
         if ready > 0 && revents & POLLIN != 0 {
             let mut bytes = [0u8; 4096];
             let count = read_backchannel(&mut bytes);
             if count <= 0 {
                 // The backend closed the backchannel, so no further status can arrive.
-                return Ok(false);
+                return Completion::TimedOut;
             }
             let chunk = &bytes[..count as usize];
             // The printer's messages are short and the backend can split one across reads, so
             // the search for progress runs over the end of the last read plus this one.
             let mut window = previous_tail.clone();
             window.extend_from_slice(chunk);
+            saw_start |= job_started(&window);
             if job_status_progress(&window) {
                 deadline = Instant::now() + silence;
             }
@@ -99,8 +117,14 @@ fn wait_for_printer_completion() -> Result<bool, String> {
             previous_tail.extend_from_slice(&chunk[chunk.len().saturating_sub(16)..]);
 
             status.extend_from_slice(chunk);
-            if pjl_job_finished(&status) {
-                return Ok(true);
+            // A terminal message that predates this job's START is the previous job's, and
+            // must not decide the outcome of this one.
+            if saw_start {
+                match job_status(&status) {
+                    JobStatus::Finished => return Completion::Finished,
+                    JobStatus::Canceled => return Completion::Canceled,
+                    JobStatus::Running => {}
+                }
             }
             // The job-status messages are short. Retain just enough tail to join a message
             // the backend split, without letting a chatty printer grow this without bound.
@@ -110,37 +134,41 @@ fn wait_for_printer_completion() -> Result<bool, String> {
             continue;
         }
         if ready > 0 && revents & POLLHUP != 0 {
-            return Ok(false);
+            return Completion::TimedOut;
         }
         if ready > 0 && revents & POLLNVAL != 0 {
-            return Ok(false); // no such descriptor is open, so there is nothing to wait on
+            return Completion::TimedOut; // no such descriptor is open
         }
     }
 }
-/// Hold the job open until the printer has printed it, then close out the PJL session.
+
+/// Hold the job open until the printer has printed it, then report how it ended.
 ///
 /// The filter keeps stdout open while it waits, exactly as HP's does: the backend is still
 /// forwarding the printer's status bytes to this process on fd 3, and a filter that has
 /// already exited is a job CUPS considers finished.
 #[cfg(not(target_os = "wasi"))]
-pub(crate) fn wait_for_printing_to_finish() -> Result<(), String> {
+pub(crate) fn wait_for_printing_to_finish() -> Completion {
     if !backchannel_is_open() {
-        return Ok(()); // run by hand, or rehearsed: there is no backchannel to read
+        return Completion::NotWaited; // run by hand, or rehearsed: no backchannel to read
     }
-    if !wait_for_printer_completion()? {
-        eprintln!(
+    let completion = wait_for_printer_completion();
+    match completion {
+        Completion::Finished => {}
+        Completion::Canceled => eprintln!(
+            "WARNING: the printer canceled the job; closing its status session so the next \
+             job starts cleanly"
+        ),
+        Completion::TimedOut => eprintln!(
             "WARNING: the printer did not report the end of the job; the job ends without \
              that notification"
-        );
+        ),
+        Completion::NotWaited => unreachable!("the backchannel was open"),
     }
-    // Nothing is written after the wait. HP's filter sends `@PJL USTATUSOFF` here, but that
-    // opens a second PJL session after the job the printer has just finished; leaving the
-    // status reports on costs a few bytes at the timed interval and cannot leave the printer
-    // waiting for the header of a job that will never come.
-    Ok(())
+    completion
 }
 
 #[cfg(target_os = "wasi")]
-pub(crate) fn wait_for_printing_to_finish() -> Result<(), String> {
-    Ok(())
+pub(crate) fn wait_for_printing_to_finish() -> Completion {
+    Completion::NotWaited
 }
