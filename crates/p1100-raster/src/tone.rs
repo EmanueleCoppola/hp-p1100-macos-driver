@@ -208,9 +208,9 @@ pub fn to_two_bit_packed(
     for y in 0..h {
         let src = &pixels[y * src_stride..];
         let dst = &mut out[y * stride..(y + 1) * stride];
-        for x in 0..w {
+        for (x, &value) in src.iter().enumerate().take(w) {
             // Complement the level: the printer's packed bits use zero for white.
-            let level = 3 - tone_level(table, src[x], x, y);
+            let level = 3 - tone_level(table, value, x, y);
             let bit = 2 * x;
             if level & 2 != 0 {
                 dst[bit / 8] |= 0x80 >> (bit & 7);
